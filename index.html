@@ -1597,12 +1597,16 @@ Sim.prototype.reset = function () {
   this.t = 0;
   this.ctrl.reset();
   this.u = 0; this.railHit = false;
-  this.hist = { t: [], th: [], p: [], u: [], E: [], w: [] };
+  this.hist = { t: [], th: [], thu: [], p: [], u: [], E: [], w: [] };
   this.push();
 };
 Sim.prototype.push = function () {
   const h = this.hist;
-  h.t.push(this.t); h.th.push(wrapA(this.x[1])); h.p.push(this.x[0]);
+  /* 原始（已折叠）角度用于误差判据；thu 是连续累加角度，用于画图不跳变 */
+  const raw = this.x[1];
+  const prev = h.thu.length ? h.thu[h.thu.length - 1] : wrapA(raw);
+  h.thu.push(prev + wrapA(raw - prev));
+  h.t.push(this.t); h.th.push(wrapA(raw)); h.p.push(this.x[0]);
   h.u.push(this.u); h.E.push(energy(this.x)); h.w.push(this.x[3]);
 };
 Sim.prototype.step = function (noise, dist) {
@@ -1810,7 +1814,16 @@ function drawPhase(cv, sim) {
   g.clearRect(0, 0, W, H);
   const P = { l: 40, r: 12, t: 10, b: 22 };
   const w = W - P.l - P.r, h = H - P.t - P.b;
-  const x0 = -Math.PI, x1 = Math.PI, y0 = -9, y1 = 9;
+  /* 相图横轴：以 ±π 为基准，若角度累加超出则自动扩展（不再在 ±π 处跳变） */
+  const thu = (sim.hist.thu && sim.hist.thu.length) ? sim.hist.thu : sim.hist.th;
+  let x0 = -Math.PI, x1 = Math.PI;
+  for (let i = 0; i < thu.length; i++) {
+    if (thu[i] < x0) x0 = thu[i];
+    if (thu[i] > x1) x1 = thu[i];
+  }
+  x0 = Math.floor(x0 / (Math.PI / 2)) * (Math.PI / 2) - Math.PI / 2;
+  x1 = Math.ceil(x1 / (Math.PI / 2)) * (Math.PI / 2) + Math.PI / 2;
+  const y0 = -9, y1 = 9;
   const sx = v => P.l + (v - x0) / (x1 - x0) * w;
   const sy = v => P.t + (1 - (v - y0) / (y1 - y0)) * h;
 
@@ -1821,14 +1834,25 @@ function drawPhase(cv, sim) {
     g.beginPath(); g.moveTo(P.l, y); g.lineTo(P.l + w, y); g.stroke();
     g.fillText(v.toFixed(1), 6, y + 3);
   }
-  [-Math.PI, -Math.PI / 2, 0, Math.PI / 2, Math.PI].forEach(v => {
+  const nHalf = Math.round((x1 - x0) / (Math.PI / 2));
+  for (let i = 0; i <= nHalf; i++) {
+    const v = x0 + i * Math.PI / 2;
     const xx = sx(v);
-    g.strokeStyle = v === 0 ? '#2a3b4d' : '#16212d';
+    g.strokeStyle = Math.abs(v) < 1e-9 ? '#2a3b4d' : '#16212d';
+    if (Math.abs(Math.abs(v) - Math.PI) < 1e-9) g.strokeStyle = '#243546';  /* ±π 处加粗 */
     g.beginPath(); g.moveTo(xx, P.t); g.lineTo(xx, P.t + h); g.stroke();
     g.fillStyle = '#4b5f73'; g.textAlign = 'center';
-    g.fillText(v === 0 ? '0' : (v > 0 ? '+' : '−') + 'π' + (Math.abs(v) === Math.PI ? '' : '/2'), xx, H - 8);
+    const k = v / (Math.PI / 2);              // 以 π/2 为单位
+    let lab;
+    if (Math.abs(k) < 1e-9) lab = '0';
+    else {
+      const num = Math.abs(k), sign = k > 0 ? '+' : '−';
+      lab = sign + (num === 1 ? '' : (Number.isInteger(num) ? num : num.toFixed(1))) + 'π/2';
+      if (Math.abs(num - 2) < 1e-9) lab = sign + 'π';
+    }
+    g.fillText(lab, xx, H - 8);
     g.textAlign = 'left';
-  });
+  }
   /* separatrix E=0 :  theta_dot = +- sqrt(2g/l (1-cos th)) */
   g.strokeStyle = 'rgba(242,169,59,.45)'; g.setLineDash([4, 4]); g.lineWidth = 1.2;
   [1, -1].forEach(sgn => {
@@ -1850,12 +1874,13 @@ function drawPhase(cv, sim) {
     if (age > 1) continue;
     g.strokeStyle = 'rgba(47,211,192,' + (0.06 + 0.9 * (1 - age)) + ')';
     g.beginPath();
-    g.moveTo(sx(sim.hist.th[i - 1]), sy(clamp(sim.hist.w ? sim.hist.w[i - 1] : 0, y0, y1)));
-    g.lineTo(sx(sim.hist.th[i]), sy(clamp(sim.hist.w ? sim.hist.w[i] : 0, y0, y1)));
+    g.moveTo(sx(thu[i - 1]), sy(clamp(sim.hist.w ? sim.hist.w[i - 1] : 0, y0, y1)));
+    g.lineTo(sx(thu[i]), sy(clamp(sim.hist.w ? sim.hist.w[i] : 0, y0, y1)));
     g.stroke();
   }
   /* current point */
-  const cx = sx(wrapA(sim.x[1])), cy = sy(clamp(sim.x[3], y0, y1));
+  const cx = sx(thu.length ? thu[thu.length - 1] : wrapA(sim.x[1]));
+  const cy = sy(clamp(sim.x[3], y0, y1));
   g.beginPath(); g.arc(cx, cy, 4.5, 0, 7);
   g.fillStyle = '#fff'; g.fill();
   g.strokeStyle = '#2fd3c0'; g.lineWidth = 2; g.stroke();
@@ -2155,11 +2180,21 @@ function render() {
       : '控制律 ≈ 0.01 ms';
 
     const ts = s.hist.t;
+    /* θ(t)：用连续累加角度，纵轴随数据自适应（至少覆盖 ±π） */
+    const thu = s.hist.thu;
+    let yLo = -Math.PI, yHi = Math.PI;
+    for (let i = Math.max(0, thu.length - 700); i < thu.length; i++) {
+      if (thu[i] < yLo) yLo = thu[i];
+      if (thu[i] > yHi) yHi = thu[i];
+    }
+    const pad = Math.max(0.35, (yHi - yLo) * 0.08);
+    yLo = Math.floor((yLo - pad) / (Math.PI / 2)) * (Math.PI / 2);
+    yHi = Math.ceil((yHi + pad) / (Math.PI / 2)) * (Math.PI / 2);
     drawChart($('chTheta'), {
-      ts, tNow: s.t, tWin: 12, yMin: -Math.PI, yMax: Math.PI, yTicks: 4,
-      fmtY: v => (v / Math.PI).toFixed(1) + 'π',
+      ts, tNow: s.t, tWin: 12, yMin: yLo, yMax: yHi, yTicks: 4,
+      fmtY: v => (Math.abs(v) < 1e-9 ? '0' : (v / Math.PI).toFixed(1) + 'π'),
       thr: 0.15,
-      series: [{ data: s.hist.th, color: COL.cy }]
+      series: [{ data: thu, color: COL.cy }]
     });
     drawChart($('chPos'), {
       ts, tNow: s.t, tWin: 12, yMin: -PL.x_max, yMax: PL.x_max, yTicks: 4,
