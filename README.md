@@ -15,6 +15,7 @@
 | **① 交互式技术报告** | 单文件 HTML：原理推导 + 四/五个控制器同台动画、相图、注意力热图，浏览器实时仿真 | `index.html` |
 | **② 复现管线** | Python：被控对象、控制器、数据生成、训练、int8 导出、统一评测 | `build/*.py` |
 | **③ 课程（10 讲 + 附录）** | 讲义（LaTeX/ctex）+ 11 个视频（LaTeX 公式、中文旁白、配乐、烧录字幕） | `course/` |
+| **④ Transformer 实现教程** | 讲义 + 3 个视频 + **纯 numpy 手写反向**与 torch 双实现（梯度差 3e-14） | `tutorial/` |
 
 ## 结果（60 组随机初值，12 s 闭环，统一协议）
 
@@ -44,6 +45,12 @@ Transformer 把硬切换学成了连续映射（Δu 减半）；RL 在训练目�
 │   ├── eval_all.py               统一评测
 │   ├── sweep.py  make_figs.py    参数搜索 / 讲义插图
 │   └── ch0*_experiments.py       各讲实验（可重跑）
+├── tutorial/                  ← Transformer 从零实现（独立教程）
+│   ├── latex/tutorial.tex        约 30 页讲义
+│   ├── code/tinytf_numpy.py      纯 numpy 前向 + 手写反向
+│   ├── code/tinytf_torch.py      torch 等价实现 + 权重互转
+│   ├── code/parity_test.py       与 autograd / 有限差分对齐
+│   └── out/                      3 个视频 + 4 张图
 └── course/
     ├── README.md               ← 课程总纲（10 讲 + 结课项目）
     ├── latex/                  ← 讲义（xelatex + ctex）
@@ -105,6 +112,17 @@ cd course/video && python3 make_ch01.py    # 渲染 + 配音 + 配乐 + 烧字�
 | A | 附录：Transformer 前向、反向与注意力解剖 | 3:17 |
 
 合计约 28.7 分钟。
+
+### Transformer 实现教程（`tutorial/`）
+
+| # | 标题 | 时长 |
+|---|---|---|
+| ① | 为什么长这样：RNN 硬伤、检索视角、√d、掩码 | 2:07 |
+| ② | 前向与反向：六行公式、两个雅可比、注意力反传 | 2:25 |
+| ③ | 两种实现：numpy 手写反向 vs torch autograd | 2:37 |
+
+关键数字：前向差 3×10⁻¹⁵、31 个参数张量梯度差 3×10⁻¹⁴、中心差分相对误差 5e-11～8e-9；
+numpy 版可直接加载生产权重（`max|Δu| = 5.4e-6` N，闭环 30/30）。
 
 ## 许可
 

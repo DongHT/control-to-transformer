@@ -9,3 +9,7 @@ course/video/assets/mathcache/
 
 # 模型检查点保留，训练日志保留；临时探针文件忽略
 build/out/probe_*.npy
+
+# tutorial 中间产物（可由脚本重生成）
+tutorial/out/data_cache.npz
+tutorial/out/*.mp4

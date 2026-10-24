@@ -3,6 +3,7 @@ import math
 import os
 import sys
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from render import (INK, DIM, FAINT, CY, AM, MG, BL, GR, BG, appear, smooth, lerp, W, H)
@@ -85,7 +86,7 @@ def curvy(cv, pts, color, width=2.0, alpha=1.0, dash=None):
 
 def basin_image(data, w, h, ss=2):
     """pre-render the (theta, omega) success map as an RGBA image."""
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
     ths = np.array(data["ths"]); ws = np.array(data["ws"])
     ok = np.array(data["ok"]).astype(bool)
     img = Image.new("RGBA", (int(w * ss), int(h * ss)), (0, 0, 0, 0))
@@ -101,3 +102,25 @@ def basin_image(data, w, h, ss=2):
             d.rectangle([i * cw, (nw - 2 - j) * chh, (i + 1) * cw + 1, (nw - 1 - j) * chh + 1],
                         fill=col)
     return img
+
+
+MENLO = "/System/Library/Fonts/Menlo.ttc"
+
+
+def code(cv, x, y, lines, size=15, color=(70, 84, 100), hl=None, hl_color=None,
+         lh=None, alpha=1.0, tag="code"):
+    """等宽代码块；hl 为要高亮的行号集合。返回 (宽, 高)。"""
+    font = ImageFont.truetype(MENLO, int(round(size * cv.ss)), index=0)
+    d = ImageDraw.Draw(cv.img)
+    lh = lh or size * 1.55
+    hl = hl or set()
+    hl_color = hl_color or (200, 130, 20)
+    w = 0.0
+    for i, ln in enumerate(lines):
+        c = hl_color if i in hl else color
+        d.text((x * cv.ss, (y + i * lh) * cv.ss), ln, font=font,
+               fill=(c[0], c[1], c[2], int(255 * alpha)))
+        w = max(w, font.getlength(ln) / cv.ss)
+    h = len(lines) * lh
+    cv.boxes.append((x, y - size * 0.9, x + w, y - size * 0.9 + h, tag))
+    return w, h
