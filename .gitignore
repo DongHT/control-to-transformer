@@ -12,4 +12,3 @@ build/out/probe_*.npy
 
 # tutorial 中间产物（可由脚本重生成）
 tutorial/out/data_cache.npz
-tutorial/out/*.mp4
