@@ -1,0 +1,150 @@
+\chapter[滑模]{第 5 讲\quad 滑模控制：把鲁棒性做进结构}
+\label{ch:smc}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 上一讲的局部稳定器是 LQR——它完全相信模型。本讲换一种思路：
+先规定一条"必须到达的流形"，再用力把状态按死在流形上。代价是抖振，收益是抗扰。\\[2pt]
+\textbf{前置}\quad 第 3 讲的加速度域；第 4 讲的"局部稳定器替换"。\\
+\textbf{视频}\quad 约 3 分钟。\quad\textbf{代码}\quad \texttt{controllers.py: SMC}。
+\end{quote}
+
+\section{从"相信模型"到"规定流形"}
+
+LQR 的隐含假设是：$A,B$ 准确、无外部扰动。实际系统里这两条都不成立
+（第 2 讲已经看到：$4$\,N 侧风就能让稳态角度偏 $0.014$\,rad）。
+
+滑模控制换一个问法：
+
+\begin{quote}
+\textbf{与其问"最优反馈是什么"，不如问"我希望状态被约束在哪个低维集合上"。}
+\end{quote}
+
+对摆杆，我们希望 $\theta$ 以某个速率衰减到 0，于是取
+\begin{equation}
+  s=\dot\theta+\lambda(\theta-\theta_{\mathrm{ref}}),\qquad \lambda>0 .
+  \label{eq:surface}
+\end{equation}
+$s=0$ 是相平面上一条直线：\textbf{只要保持在上面，$\theta$ 就按 $e^{-\lambda t}$ 衰减}。
+这把"二维跟踪问题"降成了"一维镇定问题"。
+
+\section{到达律}
+
+规定 $s$ 的收敛方式（到达律）：
+\begin{equation}
+  \dot s=-\eta\,\mathrm{sat}(s/\phi)-k_s s,\qquad \eta>0,\ \phi>0 .
+  \label{eq:reach}
+\end{equation}
+其中 $\mathrm{sat}(\cdot)$ 是带边界层的符号函数：
+\begin{equation}
+  \mathrm{sat}(x)=\begin{cases}
+    x, & |x|\le1,\\
+    \mathrm{sign}(x), & |x|>1 .
+  \end{cases}
+\end{equation}
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item $\eta$ 是\textbf{抗扰强度}：$|扰动|<\eta$ 时，扰动无法把 $s$ 推出边界层。
+  \item $\phi$ 是\textbf{边界层宽度}：$|s|<\phi$ 时用线性反馈（无抖振），
+        $|s|>\phi$ 时用等效符号函数（强鲁棒）。$\phi\to0$ 就是经典滑模，代价是抖振。
+  \item $k_s$ 是普通的比例项，加速进入边界层。
+\end{itemize}
+
+\section{解出加速度指令}
+
+把 $\ddot\theta=(g\sin\theta-v\cos\theta)/l-b_p\dot\theta/(m_pl^2)$ 代入 $\dot s$，解出 $v$：
+\begin{equation}
+  v=\frac{g\sin\theta+l\big[\lambda\dot\theta+\eta\,\mathrm{sat}(s/\phi)+k_s s\big]}{\cos\theta}.
+  \label{eq:vsmc}
+\end{equation}
+
+这个式子有两个必须处理的工程细节：
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{$1/\cos\theta$ 奇异}：第 3 讲已经量化过，$\theta\to\pm90^\circ$ 时它发散。
+        实现里把 $|\cos\theta|$ 钳位到 $\ge0.25$（对应 $\theta\le75.5^\circ$）。
+  \item \textbf{单输入两个目标}：式 \eqref{eq:vsmc} 只负责 $\theta$，小车位置没人管。
+        详见 \S5.5。
+\end{enumerate}
+
+\section{边界层与抖振}
+
+$\phi$ 越小，鲁棒性越强、抖振越大。极限情况 $\phi\to0$ 时，控制量在
+$v=\pm\infty$ 之间以开关频率跳变——真实执行器会被打坏。
+
+工程折中：$\phi$ 取"传感器噪声量级 + 执行器带宽允许的切换频率"。
+本课参数 $\phi=0.25$（单位是 $s$ 的物理量纲 rad/s），在这个值下：
+力矩的高频抖动 RMS 约 $0.02$\,N，对 $12$\,N 的执行器可以忽略。
+
+\section{一个真实的坑：小车会跑}
+
+式 \eqref{eq:vsmc} 不含 $p,\dot p$，所以小车会慢慢被推走。常见的错误做法是
+"把 $-k_xp-k_d\dot p$ 直接加到 $v$ 上"：
+
+\begin{quote}
+\textbf{实测会发散}。原因是两个回路抢同一个输入：摆杆回路要求 $v$ 朝一个方向把 $s$ 压到 0，
+回中回路却要求 $v$ 反向，两者叠加后 $s$ 被推出边界层，摆杆回路随即加大力度，形成极限环。
+\end{quote}
+
+正确的做法是\textbf{时间尺度分离}：让快速的摆杆回路去追踪一个极小的倾角偏置
+\begin{equation}
+  \theta_{\mathrm{ref}}=-\mathrm{clip}(k_pp+k_d\dot p,\ \pm0.25\ \mathrm{rad}).
+  \label{eq:lean}
+\end{equation}
+当 $p>0$ 时 $\theta_{\mathrm{ref}}<0$，摆杆回路会把摆"摆向左侧"，于是小车被慢慢拉回原点。
+摆杆回路依旧是主角，回中只是一个缓慢的参考漂移。
+
+\keypoint{这条"倾斜参考"的技巧在多输入系统里叫\textbf{级联/时标分离}；
+在单输入欠驱动系统里，它是唯一不引起回路冲突的回中方式。}
+
+\section{抗扰实测}
+
+统一协议：$40$ 组随机初值，第 4--8\,s 施加 $+4$\,N 侧向风，$12$\,s 闭环。
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+局部稳定器 & 稳态 $|\theta|$ 均值 & 稳态 $|\theta|$ 峰值 & 力 RMS \\
+\midrule
+LQR（第 2 讲） & $0.0121$\,rad & $0.0412$\,rad & $2.46$\,N \\
+SMC（本讲） & $\mathbf{0.0053}$\,rad & $0.0606$\,rad & $2.63$\,N \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+读法：
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{平均误差降低 $2.3$ 倍}（$0.0121\to0.0053$）：到达律的 $\eta$ 项在持续风的条件下
+        持续提供补偿，而 LQR 没有任何积分/鲁棒项。
+  \item \textbf{峰值反而略大}（$0.0412\to0.0606$）：风刚加上去的瞬间，滑模还在"进入边界层"的过程中，
+        有短暂的超调。这不影响长期精度，但提醒我们：\textbf{鲁棒性不是无延迟的}。
+  \item \textbf{力 RMS 高 $7\%$}：鲁棒性是用控制能量换来的。
+\end{itemize}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 滑模把跟踪问题降成一维镇定：$s=\dot\theta+\lambda(\theta-\theta_{\mathrm{ref}})$。
+  \item 到达律 $\dot s=-\eta\,\mathrm{sat}(s/\phi)-k_s s$ 用 $\eta$ 换鲁棒、用 $\phi$ 换平滑。
+  \item $1/\cos\theta$ 必须钳位，否则奇异。
+  \item 小车回中必须走"倾斜参考"，直接叠加会与摆杆回路抢输入。
+  \item 抗扰：稳态误差降 $2.3$ 倍，代价是力 RMS $+7\%$、瞬时峰值略大。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 从 $s$ 的定义出发，推导 $s$ 在 $s>0$ 与 $s<0$ 两侧的收敛速度，说明 $\eta/\phi$ 的作用。
+  \item 计算 $\lambda=6$、$\phi=0.25$ 时，边界层对应多宽的 $\theta$ 区间（取 $\dot\theta=0$）。
+  \item 把 $\eta$ 从 $6$ 调到 $30$，测力 RMS 与稳态误差，画出帕累托曲线。
+  \item 若把钳位从 $0.25$ 改成不钳位，会发生什么？用 $\theta=85^\circ$ 附近的初值实验。
+  \item （编程）复现表 5.1，并解释为什么 SMC 的峰值误差更大。
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item V. Utkin, \emph{Sliding Modes in Control and Optimization}, Springer, 1992.
+  \item J.-J. Slotine, S. S. Sastry, \emph{Tracking control of non-linear systems using sliding surfaces},
+        Int. J. Control, 1983.
+\end{itemize}

@@ -1,0 +1,82 @@
+% !TEX program = xelatex
+\documentclass[UTF8,11pt,openany]{ctexbook}
+
+\usepackage[margin=2.4cm,top=2.6cm,bottom=2.6cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{empheq}
+\usepackage{booktabs,array,multirow}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+% ---------- 版式 ----------
+\linespread{1.22}
+\setlength{\parskip}{0.35em}
+\captionsetup{font=small,labelfont=bf}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 倒立摆控制：从拉格朗日到 Transformer}
+\fancyhead[R]{\small\leftmark}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+% ---------- 定理与提示盒 ----------
+\newtheorem{proposition}{命题}[chapter]
+\newtheorem{remark}[proposition]{注}
+
+\newcommand{\keypoint}[1]{%
+  \par\medskip\noindent
+  \colorbox{gray!10}{\parbox{\dimexpr\linewidth-2\fboxsep}{%
+  \small\setlength{\parskip}{0.25em}#1}}\par\medskip}
+
+\newcommand{\pitfall}[1]{%
+  \par\medskip\noindent
+  \colorbox{orange!8}{\parbox{\dimexpr\linewidth-2\fboxsep}{%
+  \small\textbf{坑}\quad #1}}\par\medskip}
+
+% ---------- 代码 ----------
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{green!35!black},
+  stringstyle=\color{red!55!black},
+  numbers=left, numberstyle=\tiny\color{gray}, numbersep=8pt,
+  frame=single, rulecolor=\color{gray!40},
+  breaklines=true, showstringspaces=false,
+  columns=fullflexible, keepspaces=true,
+  xleftmargin=14pt, framexleftmargin=12pt
+}
+
+\title{\bfseries 倒立摆控制：从拉格朗日到 Transformer\\[6pt]
+       \large 课程讲义}
+\author{}
+\date{}
+
+\begin{document}
+\frontmatter
+\maketitle
+\tableofcontents
+\mainmatter
+
+\input{chapters/00-outline}
+\input{chapters/ch01}
+\input{chapters/ch02}
+\input{chapters/ch03}
+\input{chapters/ch04}
+\input{chapters/ch05}
+\input{chapters/ch06}
+\input{chapters/ch07}
+\input{chapters/ch08}
+\input{chapters/ch09}
+\input{chapters/ch10}
+
+\appendix
+\input{chapters/chA}
+
+\end{document}

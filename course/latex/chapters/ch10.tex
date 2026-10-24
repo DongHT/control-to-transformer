@@ -1,0 +1,211 @@
+\chapter[强化学习微调]{第 10 讲\quad 策略梯度、PPO 与域随机化}
+\label{ch:rl}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 从 MDP 与策略梯度定理出发，推导 PPO 的 clip 目标与 GAE，
+讲清奖励设计（含 potential-based shaping 的性质）与域随机化（= 分布鲁棒优化），
+最后用本用例的数字验证"RL 能超越专家、但会崩在分布外"。\\[2pt]
+\textbf{前置}\quad 第 8 讲的策略网络、第 9 讲的评测协议。\\
+\textbf{视频}\quad 约 4 分钟。\quad\textbf{代码}\quad \texttt{rl.py}、\texttt{export\_rl.py}。
+\end{quote}
+
+\section{MDP 与目标}
+
+把控制问题写成 MDP $(\mathcal{S},\mathcal{A},P,r,\gamma)$。本课：
+$\mathcal{S}=\mathbb{R}^4$（用 24 步历史作为观测），$\mathcal{A}=[-12,12]$\,N，$P$ 由第 1 讲的动力学给出，
+$r$ 见 \S10.5，$\gamma=0.995$（有效视野约 $1/(1-\gamma)=200$ 步 $=4$\,s）。
+
+目标是最大化期望折扣回报
+\begin{equation}
+  J(\theta)=\mathbb{E}_{\tau\sim p_\theta}\Big[\sum_{t=0}^{T-1}\gamma^t r(s_t,a_t)\Big],
+  \qquad p_\theta(\tau)=\rho_0(s_0)\prod_t \pi_\theta(a_t\mid s_t)P(s_{t+1}\mid s_t,a_t).
+\end{equation}
+
+\section{策略梯度定理}
+
+对 $\theta$ 求导，关键是 $p_\theta$ 里只有 $\pi_\theta$ 依赖 $\theta$：
+\begin{align}
+  \nabla_\theta J
+  &=\int \nabla_\theta p_\theta(\tau)\,R(\tau)\,d\tau
+   =\int p_\theta(\tau)\,\nabla_\theta\log p_\theta(\tau)\,R(\tau)\,d\tau \notag\\
+  &=\mathbb{E}_{\tau\sim p_\theta}\Big[\Big(\sum_t\nabla_\theta\log\pi_\theta(a_t\mid s_t)\Big)R(\tau)\Big].
+  \label{eq:pg}
+\end{align}
+
+用"因果性"去掉未来的项（$t$ 时刻的动作不影响 $t$ 之前的奖励），并用基线降方差：
+\begin{equation}
+  \nabla_\theta J=\mathbb{E}\Big[\sum_t \nabla_\theta\log\pi_\theta(a_t\mid s_t)\,
+  \big(\underbrace{R_t-\gamma V^\pi(s_{t+1})}_{\text{优势 }A_t}\big)\Big],
+  \label{eq:pg2}
+\end{equation}
+其中 $R_t=\sum_{k\ge t}\gamma^{k-t}r_k$。
+
+\subsection{本课的策略参数化}
+
+连续动作，取高斯策略并从 BC 权重热启动：
+\begin{equation}
+  a_t\sim\mathcal{N}\big(\mu_\theta(o_t),\ \sigma^2\big),\qquad
+  \mu_\theta=\text{Transformer}_\theta(o_t),\quad \sigma\ \text{可学习}.
+\end{equation}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{从 BC 初始化}：策略梯度是局部搜索，从"已经会控制"的点出发，
+        只需在 $\theta$ 附近找更优解；从随机初始化出发几乎不可能学会摆起。
+  \item \textbf{$\sigma\approx0.55$\,N}：太小没有探索，太大把已学会的策略打散。
+  \item 评估时取均值 $\mu$（确定性策略）。
+\end{itemize}
+
+\section{PPO：为什么是 clip}
+
+\subsection{重要性采样}
+
+用旧策略 $\pi_{\theta_{\text{old}}}$ 采的数据估计新策略的梯度，需要比率
+\begin{equation}
+  r_t(\theta)=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\theta_{\text{old}}}(a_t\mid s_t)} .
+\end{equation}
+目标（代理函数）
+\begin{equation}
+  L^{\text{IS}}(\theta)=\mathbb{E}\big[r_t(\theta)A_t\big].
+\end{equation}
+问题是：$r_t$ 偏离 $1$ 太远时，方差爆炸，估计失效。
+
+\subsection{从信任域到 clip}
+
+TRPO 的做法是加约束 $\mathbb{E}[\mathrm{KL}(\pi_{\theta_{\text{old}}}\|\pi_\theta)]\le\delta$。
+PPO 用一个更简单的一阶近似——\textbf{把比率裁到 $[1-\epsilon,1+\epsilon]$}：
+\begin{equation}
+  L^{\text{CLIP}}(\theta)=\mathbb{E}\Big[\min\big(r_tA_t,\
+  \mathrm{clip}(r_t,1-\epsilon,1+\epsilon)A_t\big)\Big].
+  \label{eq:clip}
+\end{equation}
+
+\begin{quote}
+\textbf{为什么这个 $\min$ 是对的？}分两种情况：
+若 $A_t>0$（好动作），$r_t$ 增大有收益，但被 $\mathrm{clip}$ 截住，防止一步走太远；
+若 $A_t<0$（坏动作），$r_t$ 减小有收益，同样被截住。
+$\min$ 保证\textbf{截断只在你"贪心过头"时生效}，因此它是"悲观"的一侧，
+等价于一个软信任域。
+\end{quote}
+
+本课 $\epsilon=0.2$、每轮 $2$ 个 epoch——都偏向保守，因为策略已经"能用"，
+我们只想微调，不想破坏。
+
+\section{GAE：优势估计的偏差-方差权衡}
+
+$n$ 步优势估计
+\begin{equation}
+  \hat A_t^{(n)}=\sum_{k=0}^{n-1}\gamma^k r_{t+k}+\gamma^n V(s_{t+n})-V(s_t).
+\end{equation}
+GAE 把所有 $n$ 用指数权重平均：
+\begin{equation}
+  \hat A^{\text{GAE}(\lambda)}_t=\sum_{l\ge0}(\gamma\lambda)^l\delta_{t+l},
+  \qquad \delta_t=r_t+\gamma V(s_{t+1})-V(s_t).
+\end{equation}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item $\lambda=0$：$\hat A=\delta_t$，方差小、偏差大（依赖 $V$ 的准确性）。
+  \item $\lambda=1$：$\hat A=R_t-V(s_t)$，无偏、方差大。
+  \item 本课 $\lambda=0.95$：偏向低方差一侧，因为 $V$ 是同一个小网络估的，不够准。
+\end{itemize}
+
+\section{奖励设计与它的性质}
+
+本课每 $20$\,ms 一步：
+\begin{equation}
+  r=\cos\theta-0.15p^2-0.5\Big(\frac{u}{12}\Big)^2+0.5\cdot\mathbf 1\{|\theta|<0.1\}
+    -4\cdot\mathbf 1\{\text{撞墙}\}.
+\end{equation}
+
+\subsection{为什么写物理量而不是指标}
+
+奖励里\textbf{没有}"摆起时间"。速度是 $\cos\theta$ 的时间累积自然产生的。
+若直接奖励 $-t_{\text{up}}$，策略会倾向于"快速但不稳"的解，
+甚至学会利用仿真器的边界效应。
+
+\subsection{奖励整形不改变最优策略}
+
+若加一个"势函数"整形项（Ng 等，1999）：
+\begin{equation}
+  r'(s,a,s')=r(s,a,s')+\gamma\Phi(s')-\Phi(s),
+\end{equation}
+则对任意 $\Phi$，最优策略不变（因为沿轨迹求和后只剩 $-\Phi(s_0)+\gamma^T\Phi(s_T)$ 的常数项）。
+本课没有加整形项，但这条性质解释了为什么"加一点引导奖励"是安全的——
+只要写成势函数差分形式。
+
+\section{域随机化 = 分布鲁棒优化}
+
+把环境参数（风的强度与时段）记为 $\xi$，训练分布 $P_\xi$。
+域随机化求解
+\begin{equation}
+  \max_\pi\ \mathbb{E}_{\xi\sim\mathcal{U}}\ \mathbb{E}_{\tau\sim P_\xi}[R(\tau)],
+\end{equation}
+它是分布鲁棒优化 $\max_\pi\min_{Q\in\mathcal{U}} \mathbb{E}_{Q}[R]$ 的一个"平均版"近似：
+不追求最坏情况，而是让策略在\textbf{一族环境}上都不错。
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+训练方式 & $+4$\,N 侧风成功率 & 稳态 $|\theta|$ & 摆起时间 \\
+\midrule
+无 DR & $3\%$ & $0.037$\,rad & $2.22$\,s \\
+DR（$60\%$ 回合带风） & $\mathbf{100\%}$ & $0.0127$\,rad & $2.31$\,s \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{$3\%$ 是怎么来的？}不是策略"不会抗扰"，而是它把车"管得很松"：
+训练里没有持续外力，位置误差几乎不被惩罚，于是它学会了"小车漂一点无所谓"。
+一旦有 $4$\,N 的恒力，小车就会一路漂到导轨尽头。\textbf{鲁棒性是分布的性质，不是参数的性质。}
+\end{quote}
+
+\section{结果与帕累托}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+策略 & 摆起 & 力 RMS & 力总变差 & 最大 $\Delta u$ & $+4$\,N \\
+\midrule
+专家（能量+LQR） & $2.84$ & $2.42$ & $107$ & $10.05$ & $100\%$ \\
+BC + DAgger & $2.74$ & $2.39$ & $109$ & $5.36$ & $80\%$ \\
+RL & $\mathbf{2.22}$ & $\mathbf{2.06}$ & $\mathbf{65}$ & $3.89$ & $3\%$ \\
+RL + DR & $2.31$ & $2.12$ & $70$ & $\mathbf{3.74}$ & $\mathbf{100\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+读法：
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item RL 在"摆起 / 省力 / 平滑"三项上全面超过专家（$-22\%$、$-15\%$、$-40\%$）；
+  \item 力总变差从 $107$ 降到 $65$，是"少来回折腾"的直接证据，而这一项\textbf{没有被显式优化}；
+  \item 最大单步跳变 $10.05\to3.74$：它把第 6 讲的硬切换学成了连续映射；
+  \item 抗扰是唯一输的一项，DR 修回来之后仍保住了大部分收益。
+\end{itemize}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 策略梯度定理：$\nabla J=\mathbb{E}[\nabla\log\pi\cdot A]$；从 BC 热启动是关键。
+  \item PPO 的 clip 是信任域的一阶近似，$\min$ 让它"只在贪心过头时截断"。
+  \item GAE 用 $\lambda$ 在偏差与方差之间折中；本课 $\lambda=0.95$。
+  \item 奖励写物理量；势函数整形理论上不改变最优策略。
+  \item 域随机化是分布鲁棒的平均版近似：$3\%\to100\%$，代价是摆起慢 $0.09$\,s。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 推导式 \eqref{eq:pg} 中"去掉未来项"的那一步，写出用到的因果性假设。
+  \item 证明式 \eqref{eq:clip} 在 $A_t>0$ 与 $A_t<0$ 两种情形下分别等价于什么约束。
+  \item 用 $\lambda=0$ 与 $\lambda=1$ 各训练一次，比较收敛速度与最终回报的方差。
+  \item 构造一个势函数 $\Phi(p)=-\tfrac12 p^2$ 的整形项，验证最优策略不变（至少实验上）。
+  \item 把 DR 的分布换成"最坏情况"（固定 $5$\,N 恒风），训练结果会怎样？为什么它更保守？
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item R. Sutton, A. Barto, \emph{Reinforcement Learning: An Introduction}, 2nd ed., 2018.
+  \item J. Schulman et al., \emph{Trust region policy optimization}, ICML 2015；
+        \emph{Proximal policy optimization}, arXiv:1707.06347.
+  \item A. Ng, D. Harada, S. Russell, \emph{Policy invariance under reward transformations}, ICML 1999.
+\end{itemize}

@@ -1,0 +1,187 @@
+<section id="model">
+  <h2><span class="n">01</span>建模：一台欠驱动、非线性、不稳定系统</h2>
+  <p class="lead">
+    小车只能沿导轨水平移动，能施加的唯一控制量是水平推力 <span class="i">u</span>；
+    摆杆的倾角没有任何直接驱动。这就是典型的<strong>欠驱动</strong>（2 个自由度、1 个输入）系统，
+    并且直立平衡点是不稳定的。先把物理写清楚，后面所有控制器都建立在这个模型上。
+  </p>
+
+  <div class="grid2" style="align-items:center;margin-top:18px">
+    <div>
+      <h4>坐标与符号</h4>
+      <dl class="kv">
+        <dt>p</dt><dd>小车位置 [m]，导轨中心为 0</dd>
+        <dt>θ</dt><dd>摆杆与<strong>竖直向上</strong>方向的夹角 [rad]，逆时针/顺时针见右图</dd>
+        <dt>u</dt><dd>作用在小车上的水平力 [N]</dd>
+        <dt>m<sub>c</sub>, m<sub>p</sub></dt><dd>小车质量、摆杆等效质量 [kg]</dd>
+        <dt>l</dt><dd>转轴到摆杆质心的距离 [m]</dd>
+        <dt>b<sub>c</sub>, b<sub>p</sub></dt><dd>导轨/转轴处的粘性阻尼</dd>
+      </dl>
+      <p class="dim" style="margin-top:10px">
+        θ = 0 表示摆杆笔直向上（不稳定平衡），θ = ±π 表示垂下（稳定平衡）。
+        全部状态：<span class="mono">x = [p, θ, ṗ, θ̇]ᵀ ∈ ℝ⁴</span>。
+      </p>
+    </div>
+    <div class="card" style="padding:6px">
+      <svg viewBox="0 0 520 300" width="100%" height="auto" role="img" aria-label="倒立摆示意图">
+        <defs>
+          <linearGradient id="railg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2a3b4d"/><stop offset="1" stop-color="#16212d"/>
+          </linearGradient>
+          <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 z" fill="#f2a93b"/>
+          </marker>
+          <marker id="arwc" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 z" fill="#2fd3c0"/>
+          </marker>
+        </defs>
+        <!-- rail -->
+        <rect x="30" y="232" width="460" height="10" rx="3" fill="url(#railg)" stroke="#26455c"/>
+        <line x1="30" y1="245" x2="490" y2="245" stroke="#1a2632"/>
+        <!-- wall limits -->
+        <line x1="52" y1="196" x2="52" y2="242" stroke="#e0619e" stroke-dasharray="4 4" opacity=".7"/>
+        <line x1="468" y1="196" x2="468" y2="242" stroke="#e0619e" stroke-dasharray="4 4" opacity=".7"/>
+        <text x="52" y="190" fill="#e0619e" font-size="11" text-anchor="middle" font-family="ui-monospace">−x_max</text>
+        <text x="468" y="190" fill="#e0619e" font-size="11" text-anchor="middle" font-family="ui-monospace">+x_max</text>
+        <!-- center line -->
+        <line x1="260" y1="150" x2="260" y2="252" stroke="#3d5164" stroke-dasharray="3 5"/>
+        <!-- cart -->
+        <g transform="translate(184,205)">
+          <rect x="0" y="0" width="86" height="30" rx="6" fill="#1d2c3b" stroke="#3d5c78" stroke-width="1.5"/>
+          <circle cx="18" cy="34" r="7" fill="#0e1620" stroke="#57a8f5" stroke-width="1.5"/>
+          <circle cx="68" cy="34" r="7" fill="#0e1620" stroke="#57a8f5" stroke-width="1.5"/>
+          <text x="43" y="20" fill="#93a5b8" font-size="11" text-anchor="middle" font-family="ui-monospace">m_c</text>
+        </g>
+        <!-- pole at theta -->
+        <g transform="translate(227,205)">
+          <line x1="0" y1="0" x2="86" y2="-146" stroke="#2fd3c0" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="86" cy="-146" r="12" fill="#0f2725" stroke="#2fd3c0" stroke-width="2"/>
+          <circle cx="86" cy="-146" r="4" fill="#2fd3c0"/>
+          <text x="104" y="-150" fill="#2fd3c0" font-size="11" font-family="ui-monospace">m_p</text>
+          <circle cx="0" cy="0" r="4.5" fill="#dae4ee"/>
+        </g>
+        <!-- vertical reference + theta arc -->
+        <line x1="227" y1="205" x2="227" y2="40" stroke="#63788d" stroke-dasharray="4 5"/>
+        <path d="M227,120 A85,85 0 0 1 272,128" fill="none" stroke="#f2a93b" stroke-width="1.6"/>
+        <text x="243" y="112" fill="#f2a93b" font-size="13" font-family="Times New Roman" font-style="italic">θ</text>
+        <text x="232" y="34" fill="#63788d" font-size="10.5" font-family="ui-monospace">竖直向上 (θ=0)</text>
+        <!-- force arrow -->
+        <line x1="270" y1="220" x2="330" y2="220" stroke="#f2a93b" stroke-width="2.5" marker-end="url(#arw)"/>
+        <text x="336" y="224" fill="#f2a93b" font-size="13" font-family="Times New Roman" font-style="italic">u</text>
+        <!-- p arrow -->
+        <line x1="260" y1="265" x2="332" y2="265" stroke="#2fd3c0" stroke-width="1.4" marker-end="url(#arwc)"/>
+        <text x="286" y="282" fill="#2fd3c0" font-size="13" font-family="Times New Roman" font-style="italic">p</text>
+        <!-- gravity -->
+        <line x1="86" y1="0" x2="86" y2="34" stroke="#63788d" stroke-width="1.4" marker-end="url(#arw)" transform="translate(141,59)"/>
+        <text x="152" y="70" fill="#63788d" font-size="11" font-family="Times New Roman" font-style="italic">m_p g</text>
+      </svg>
+    </div>
+  </div>
+
+  <h3>拉格朗日方程与运动方程</h3>
+  <p>取广义坐标 <span class="i">q</span> = (p, θ)，摆杆视为质点，其位置为：</p>
+  <div class="eq">
+    x<sub>p</sub> <span class="op">=</span> p + l sin θ<span class="op">,</span>
+    &nbsp;&nbsp;y<sub>p</sub> <span class="op">=</span> l cos θ
+    <span class="tag">运动学</span>
+  </div>
+  <div class="eq">
+    T <span class="op">=</span> ½ m<sub>c</sub> ṗ² + ½ m<sub>p</sub> <span class="op">[</span>(ṗ + l θ̇ cos θ)² + (l θ̇ sin θ)²<span class="op">]</span>
+    <span class="op">,</span>&nbsp;&nbsp;
+    V <span class="op">=</span> m<sub>p</sub> g l cos θ
+    <span class="tag">动能 / 势能</span>
+  </div>
+  <div class="eq">
+    d/dt (∂L/∂q̇<sub>i</sub>) − ∂L/∂q<sub>i</sub> + ∂R/∂q̇<sub>i</sub> <span class="op">=</span> Q<sub>i</sub>
+    <span class="op">,</span>&nbsp;&nbsp;L = T − V<span class="op">,</span>&nbsp;&nbsp;
+    R <span class="op">=</span> ½ b<sub>c</sub> ṗ² + ½ b<sub>p</sub> θ̇²
+    <span class="tag">Euler–Lagrange + Rayleigh 耗散</span>
+  </div>
+  <p>代入整理得到两个<strong>耦合</strong>的二阶方程（注意 cos θ 交叉项——这就是"非线性"的来源）：</p>
+  <div class="eq">
+    (m<sub>c</sub>+m<sub>p</sub>) p̈ + m<sub>p</sub> l cos θ · θ̈ − m<sub>p</sub> l sin θ · θ̇² <span class="op">=</span> u − b<sub>c</sub> ṗ
+    <span class="tag">小车</span>
+  </div>
+  <div class="eq">
+    m<sub>p</sub> l cos θ · p̈ + m<sub>p</sub> l² θ̈ − m<sub>p</sub> g l sin θ <span class="op">=</span> −b<sub>p</sub> θ̇
+    <span class="tag">摆杆</span>
+  </div>
+  <p>解出加速度（这就是仿真器里逐行实现的那两个式子，整个页面共用）：</p>
+  <div class="eq">
+    p̈ <span class="op">=</span>
+    <span style="display:inline-block;vertical-align:middle">
+      <span style="border-bottom:1px solid #3d5164;padding:0 8px">
+        u − b<sub>c</sub> ṗ + m<sub>p</sub> l sin θ · θ̇² + b<sub>p</sub> cos θ · θ̇ − m<sub>p</sub> g sin θ cos θ
+      </span><br>
+      <span style="padding:0 8px">m<sub>c</sub> + m<sub>p</sub> sin²θ</span>
+    </span>
+    <span class="op">,</span>&nbsp;&nbsp;
+    θ̈ <span class="op">=</span>
+    <span style="display:inline-block;vertical-align:middle">
+      <span style="border-bottom:1px solid #3d5164;padding:0 8px">
+        g sin θ − p̈ cos θ − b<sub>p</sub> θ̇ /(m<sub>p</sub> l)
+      </span><br>
+      <span style="padding:0 8px">l</span>
+    </span>
+    <span class="tag">闭环仿真核心</span>
+  </div>
+  <div class="note">
+    <b>两个关键结构事实</b>：① 分母 <span class="mono">m_c + m_p sin²θ ≥ m_c &gt; 0</span>，
+    所以<strong>小车通道永远可以精确反解</strong>（后文"部分反馈线性化"的基础）；
+    ② 摆杆方程里 <span class="mono">cos θ</span> 是 <span class="mono">p̈</span> 的系数，
+    当 θ → ±90° 时它趋于 0，<strong>摆杆通道在水平位置"失去权限"</strong>——这就是不能简单地
+    "用 p̈ 直接控制 θ" 的原因，也是所有非线性控制器必须面对的奇异性。
+  </div>
+
+  <h3>能量：把"摆起来"变成一个标量目标</h3>
+  <p>以直立静止为能量零点，摆杆的机械能为</p>
+  <div class="eq">
+    E(x) <span class="op">=</span> ½ m<sub>p</sub> l² θ̇² + m<sub>p</sub> g l (cos θ − 1)
+    <span class="op">,</span>&nbsp;&nbsp;
+    E = 0 ⇔ 摆杆静止于竖直向上<span class="op">;</span>&nbsp;&nbsp;E = −2 m<sub>p</sub> g l ⇔ 静止下垂
+    <span class="tag">能量整定的目标函数</span>
+  </div>
+  <p>
+    这一步很关键：<strong>"把摆甩起来"被转换成了"把标量 E 推到 0"</strong>。
+    从下垂位置（E ≈ −2.94 J）出发，只要让 E 单调爬升到 0，摆杆就必然经过直立附近——
+    至于中间姿态长什么样，控制律完全不用管。
+  </p>
+
+  <h3>线性化：LQR 的适用边界</h3>
+  <p>在直立平衡点 (θ, θ̇, ṗ) = 0 处线性化，得到 <span class="mono">δẋ = A δx + B δu</span>：</p>
+  <div class="eq small">
+    A <span class="op">=</span>
+    <span style="display:inline-block;vertical-align:middle;font-family:var(--mono);font-size:13px">
+      <span style="display:grid;grid-template-columns:repeat(4,66px);gap:2px;text-align:right">
+        <span>0</span><span>0</span><span>1</span><span>0</span>
+        <span>0</span><span>0</span><span>0</span><span>1</span>
+        <span>0</span><span>0</span><span>−0.120</span><span>0.004</span>
+        <span>0</span><span>16.35</span><span>0.200</span><span>−0.0067</span>
+      </span>
+    </span>
+    <span class="op">,</span>&nbsp;&nbsp;
+    B <span class="op">=</span>
+    <span style="display:inline-block;vertical-align:middle;font-family:var(--mono);font-size:13px;text-align:right">
+      <span style="display:grid;grid-template-columns:56px;gap:2px"><span>0</span><span>0</span><span>1</span><span>−1.667</span></span>
+    </span>
+    <span class="tag">A 的特征值：0, +4.04, −4.05, −0.12</span>
+  </div>
+  <p>
+    特征值中出现 <span class="mono">+4.04</span>：<strong>开环不稳定</strong>（约 0.25 s 时间常数，倾角每 0.25 s 放大 e 倍）。
+    线性化只有效在 θ 很小、速度很小的局部——但在这一局部里，它给出的控制器极其高效。
+  </p>
+
+  <h3>被控对象参数（页面内仿真器实际使用）</h3>
+  <table>
+    <thead><tr><th>符号</th><th>取值</th><th>含义</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td class="num">m<sub>c</sub></td><td class="num">1.00 kg</td><td>小车质量</td><td style="text-align:left" class="dim">—</td></tr>
+      <tr><td class="num">m<sub>p</sub></td><td class="num">0.25 kg</td><td>摆杆质量</td><td style="text-align:left" class="dim">轻摆杆 ≈ 硬欠驱动</td></tr>
+      <tr><td class="num">l</td><td class="num">0.60 m</td><td>质心距离</td><td style="text-align:left" class="dim">摆长 1.2 m 量级</td></tr>
+      <tr><td class="num">b<sub>c</sub> / b<sub>p</sub></td><td class="num">0.12 / 0.004</td><td>阻尼</td><td style="text-align:left" class="dim">导轨摩擦不可忽略</td></tr>
+      <tr><td class="num">u<sub>max</sub></td><td class="num">12 N</td><td>执行器饱和</td><td style="text-align:left" class="dim">硬限幅，控制器必须自知</td></tr>
+      <tr><td class="num">x<sub>max</sub></td><td class="num">2.40 m</td><td>导轨半长</td><td style="text-align:left" class="dim">越界即"撞墙"（位置钳位、速度清零）</td></tr>
+      <tr><td class="num">Δt</td><td class="num">20 ms</td><td>控制/积分周期</td><td style="text-align:left" class="dim">50 Hz，RK4 两子步</td></tr>
+    </tbody>
+  </table>
+</section>

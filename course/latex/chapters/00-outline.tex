@@ -1,0 +1,74 @@
+\chapter*{课程总纲}
+\addcontentsline{toc}{chapter}{课程总纲}
+\markboth{课程总纲}{课程总纲}
+
+\section*{这门课想解决什么问题}
+
+一个只能左右推的小车，上面立着一根杆。我们要让它从下垂状态甩起来、在
+顶端稳住，并且——这是关键——要说清楚\textbf{为什么这样设计}、\textbf{它在哪里会失效}、
+\textbf{失效后怎么办}。
+
+这门课的主线是不断"换坐标、换目标、换表示"：
+
+\begin{center}
+\small
+建模 $\rightarrow$ 线性基线 $\rightarrow$ 反馈线性化 $\rightarrow$ 能量整定
+$\rightarrow$ 滑模 $\rightarrow$ 切换 $\rightarrow$ 数据 $\rightarrow$ Transformer
+$\rightarrow$ DAgger $\rightarrow$ 强化学习
+\end{center}
+
+每一步都不是"更高级的方法取代低级方法"，而是\textbf{换一个角度回答同一个问题}：
+线性基线告诉你局部能有多好，能量整定告诉你全局目标可以有多简单，
+切换告诉你两段局部真理怎么缝合，数据驱动告诉你"控制律"可以不是人写的，
+强化学习告诉你目标函数一换，天花板就能抬高——但分布外照样会摔。
+
+\section*{课程结构：10 讲 + 1 个结课项目}
+
+\begin{center}
+\small
+\begin{tabular}{@{}clp{7.6cm}c@{}}
+\toprule
+讲 & 主题 & 核心内容 & 视频 \\
+\midrule
+1 & 建模 & 拉格朗日方程、能量、线性化、欠驱动性与可控性 & 9 min \\
+2 & 线性基线 & LQR、Riccati、吸引域、能力边界（27\%） & 10 min \\
+3 & 反馈线性化 & 小车通道精确反解、奇异点、内环实现 & 8 min \\
+4 & 能量整定 & $\dot E=-m l(\dot\theta\cos\theta)v$、Lyapunov、LaSalle & 11 min \\
+5 & 滑模 & 滑模面、到达律、边界层、匹配扰动 & 11 min \\
+6 & 切换与监督 & 捕获域、迟滞、模式抖振、切换瞬态 & 9 min \\
+7 & 数据与模仿 & token 设计、窗口、探索噪声、分布漂移 & 10 min \\
+8 & Transformer 策略 & 因果掩码、训练、int8 部署、注意力分析 & 11 min \\
+9 & DAgger 与评测 & 离线/闭环指标的裂缝、评测协议、统计陷阱 & 9 min \\
+10 & 强化学习微调 & 奖励设计、PPO、域随机化、分布外崩溃 & 12 min \\
+\midrule
+\multicolumn{2}{@{}l}{结课项目} & 传感器噪声、时延、饱和、安全滤波、半实物 & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{每一讲的"四段式"}
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{问题}：先给现象和数字（往往是失败），再讲方法。
+  \item \textbf{推导}：只留必要的数学，一般不超过三个公式。
+  \item \textbf{实现}：10--30 行核心代码，讲清工程细节（饱和、归一化、奇异点）。
+  \item \textbf{验证}：用数字回答"它到底好多少、代价是什么"。
+\end{enumerate}
+
+\section*{贯穿全课的评测协议}
+
+为了所有数字可比，全课统一使用同一套协议：
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item 60 组随机初始条件：$\theta_0$ 在 $[-\pi,\pi]$ 上均匀分布，$p_0\in[-1,1]$\,m，
+        速度小幅随机；
+  \item 12\,s 闭环，控制周期 20\,ms（50\,Hz），RK4 两子步；
+  \item 成功判据：最后 3\,s 内 $|\theta|<0.15$\,rad 且 $|p|<1.5$\,m；
+  \item 扰动场景：第 4--8\,s 施加 $+4$\,N 持续侧向风（匹配扰动）。
+\end{itemize}
+
+\keypoint{读这门课时请始终带着两个问题：\textbf{这个方法在哪里失效？}\
+\textbf{它的代价是什么？}——本课每个结论都会给出对应的数字，包括失败的那些。}
+
+\vspace{1em}
+\noindent\textit{各讲详细提纲见各讲讲义开头。}

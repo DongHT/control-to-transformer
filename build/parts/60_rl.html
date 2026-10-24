@@ -1,0 +1,135 @@
+<section id="rl">
+  <h2><span class="n">06</span>模仿学习之后：RL 能超越"教练"吗？</h2>
+  <p class="lead">
+    先澄清一个容易混淆的点：<strong>Transformer 是网络结构，模仿学习只是学习目标</strong>。
+    同一个网络，可以拿专家动作做回归（BC/DAgger），也可以拿闭环回报做策略梯度（PPO），
+    还可以蒸馏 MPC 或做可微仿真。所以"Transformer 只是模仿学习吗"这个问题，
+    答案取决于你给它喂什么监督信号。
+    <br>
+    下面做一次<strong>受控实验</strong>：同一个网络、同一份 BC+DAgger 初始化，只把目标函数从
+    "匹配专家动作"换成"最大化闭环回报"，看它能不能打过数据来源。
+  </p>
+
+  <div class="grid3" style="margin-top:18px">
+    <div class="card">
+      <div class="tagline">Objective A</div>
+      <h4>行为克隆 / DAgger</h4>
+      <p style="font-size:13.5px">损失 = ‖π(s) − π<sub>expert</sub>(s)‖²。学到的是<strong>专家的决策函数</strong>，
+      上限就是专家本身，且无处不在地继承专家的保守性。</p>
+      <div class="mono" style="font-size:12px;color:var(--tx3)">t_up 2.74 s · 力 2.39 N</div>
+    </div>
+    <div class="card">
+      <div class="tagline">Objective B</div>
+      <h4>策略梯度（PPO）</h4>
+      <p style="font-size:13.5px">损失 = −E[优势·比值]。学到的是<strong>在你定义的回报下最优的策略</strong>，
+      可以直接优化"多快、多省力、别撞墙"这些你真正关心的指标。</p>
+      <div class="mono" style="font-size:12px;color:var(--cy)">t_up 2.22 s · 力 2.06 N</div>
+    </div>
+    <div class="card">
+      <div class="tagline">Objective C</div>
+      <h4>蒸馏更强的专家</h4>
+      <p style="font-size:13.5px">把专家换成 NMPC / 轨迹优化等离线 Oracle，仍然用回归学。
+      也能"超越"，因为<strong>天花板跟着数据源一起抬高了</strong>——只是代价是要能实时求解那个 Oracle。</p>
+      <div class="mono" style="font-size:12px;color:var(--tx3)">本项目未做，仅作对照</div>
+    </div>
+  </div>
+
+  <h3>实验设置：只换目标函数</h3>
+  <ul>
+    <li><b>网络</b>：完全相同（2 层因果 Transformer，18,177 参数），初始化 = 上面的 BC+DAgger 权重。</li>
+    <li><b>动作分布</b>：网络输出当作高斯策略的均值，σ≈0.55 N 可学习；训练时采样，评估时取均值。</li>
+    <li><b>回报</b>：每 20 ms 一步
+      <span class="mono">r = cos θ − 0.15p² − 0.5(u/12)² + 0.5·1{|θ|&lt;0.1} − 4·1{撞墙}</span>。
+      注意这里<strong>没有</strong>"摆起时间"这一项，速度是 cos θ 累积出来的自然结果。</li>
+    <li><b>PPO</b>：48 个并行环境，固定 8 s 回合，γ=0.995，clip 0.2，2 epoch，lr 1.5e-4，150 次迭代（CPU 约 9 分钟）。</li>
+    <li><b>第二轮（+DR）</b>：在第一轮基础上加入<strong>域随机化</strong>——60% 的回合随机带 1.5–5 N、持续 1–3 s 的侧向风，
+      其余回合无扰动；训练 104 次迭代。</li>
+    <li><b>评测</b>：与全文完全相同的 60 组随机初值、12 s 闭环、50 Hz；直接用 int8 量化后的权重（也就是浏览器跑的那份）。</li>
+  </ul>
+
+  <h3>结果：赢了三个指标，输了一个指标</h3>
+  <table>
+    <thead>
+      <tr><th>控制器</th><th>摆起时间</th><th>稳态 |θ|</th><th>力 RMS</th><th>力总变差</th><th>最大单步 Δu</th>
+      <th>max |p|</th><th>撞墙率</th><th>+4N 成功率</th><th>+4N |θ|</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="pill cy">Energy+LQR</span> 专家</td>
+        <td class="num">2.84 s</td><td class="num">0.0004</td><td class="num">2.42</td><td class="num">107</td>
+        <td class="num">10.05</td><td class="num">1.19</td><td class="num">7%</td><td class="num">100%</td><td class="num">0.014</td>
+      </tr>
+      <tr>
+        <td><span class="pill mg">Transformer</span> BC+DAgger</td>
+        <td class="num">2.74 s</td><td class="num">0.0012</td><td class="num">2.39</td><td class="num">109</td>
+        <td class="num">5.36</td><td class="num">1.43</td><td class="num">13%</td><td class="num">80%</td><td class="num">0.215</td>
+      </tr>
+      <tr style="background:#101c22">
+        <td><span class="pill" style="color:#8ff0e2;border-color:#1f6f68">Transformer</span> + RL</td>
+        <td class="num" style="color:#8ff0e2"><b>2.22 s</b></td><td class="num">0.0006</td>
+        <td class="num" style="color:#8ff0e2"><b>2.06</b></td><td class="num" style="color:#8ff0e2"><b>64.6</b></td>
+        <td class="num">3.89</td><td class="num">1.40</td><td class="num">15%</td>
+        <td class="num" style="color:#e0619e"><b>3%</b></td><td class="num">0.037</td>
+      </tr>
+      <tr style="background:#101c22">
+        <td><span class="pill" style="color:#8ff0e2;border-color:#1f6f68">Transformer</span> + RL + DR</td>
+        <td class="num">2.31 s</td><td class="num">0.0010</td><td class="num">2.12</td><td class="num">69.8</td>
+        <td class="num" style="color:#8ff0e2"><b>3.74</b></td><td class="num">1.33</td><td class="num">12%</td>
+        <td class="num" style="color:#7bd66b"><b>100%</b></td><td class="num" style="color:#7bd66b"><b>0.013</b></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note" style="margin-top:16px">
+    <b>读这张表的三句话</b><br>
+    ① <b>RL 确实超越了专家</b>：摆起时间 2.84 → 2.22 s（−22%），力矩 RMS 2.42 → 2.06 N（−15%），
+       力总变差 107 → 65（−40%）。最后这一项即使不优化速度也不会变好，是"少来回折腾"的直接证据。<br>
+    ② <b>但它在训练分布外崩了</b>：+4 N 持续侧风下成功率 3%（专家 100%）。
+       注意它的<strong>角度</strong>误差其实很小（0.037 rad），失败的原因是<strong>小车被风推走</strong>
+       —— 训练环境里根本没有风，所以它没学会任何"位移补偿"。<br>
+    ③ <b>把分布放进训练就行</b>：加入扰动随机化（DR）后，+4 N 成功率回到 100%、
+       稳态角度 0.013 rad（与专家 0.014 持平），同时保住了大部分收益
+       （摆起 2.31 s、力 2.12 N、Δu 3.74 N 仍是四者中最平滑的）。
+  </div>
+
+  <h3>训练过程</h3>
+  <div class="card" style="padding:14px 16px 6px">
+    <canvas id="rlChart" height="250" style="width:100%;height:250px"></canvas>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--tx3);margin:4px 0 10px">
+      <span><i style="display:inline-block;width:16px;height:2px;background:#2fd3c0;vertical-align:middle"></i> 摆起时间 t<sub>up</sub>（左轴）</span>
+      <span><i style="display:inline-block;width:16px;height:2px;background:#f2a93b;vertical-align:middle"></i> 力 RMS（右轴）</span>
+      <span><i style="display:inline-block;width:8px;height:8px;background:#e0619e;vertical-align:middle;border-radius:50%"></i> 切换训练阶段（BC 初始化 → RL → RL+DR）</span>
+    </div>
+  </div>
+  <p class="dim">
+    竖线处是初始化点：BC+DAgger 的 2.74 s / 2.39 N。第一段（RL）在 100 次迭代内把 t<sub>up</sub> 压到 2.0 s 附近并保持；
+    第二段（+DR）基本守住 2.0–2.2 s，同时把 +4 N 扰动成功率从 0 拉回 100%。
+    注意这条评估曲线本身有 ±0.15 s 的样本噪声（只有 24 组初值），而且 +4 N 那项在训练中会在 0%~100% 之间剧烈跳动——
+    因为判据是"小车位移 &lt; 1.5 m"，策略的一点点改动就会让整批回合跨过阈值。最终检查点按"成功 + 摆起时间 + 撞墙"综合分挑选（it=32）。
+  </p>
+
+  <h3>所以"超越数据来源"的准确条件是什么</h3>
+  <div class="grid2" style="margin-top:8px">
+    <div class="card">
+      <h4>能超越的：被优化的指标</h4>
+      <p style="font-size:13.5px">
+        当对手（专家）是为"可解释、可证明"设计的，它的增益往往偏保守——能量泵增益要为全工况留余量，
+        切换阈值要为噪声留余量。PPO 不需要这些余量，它直接在这些具体初值上把 t<sub>up</sub> 压到极限。
+        这是<strong>结构化设计与数值优化</strong>的差距，不是"神经网络比控制理论强"。
+      </p>
+    </div>
+    <div class="card">
+      <h4>不能自动超越的：分布外与安全</h4>
+      <p style="font-size:13.5px">
+        RL 只在训练分布内"正确"。专家控制器的鲁棒性是<strong>写进结构里的</strong>（滑模的 η 项、LQR 的稳定性保证），
+        而 RL 的鲁棒性只能<strong>写进分布里</strong>（域随机化）。也没有 Lyapunov 证书：
+        这段 RL 策略的撞墙率 15% 依然高于专家的 7%，要压下去就得把约束显式放进奖励或加 CBF 安全层。
+      </p>
+    </div>
+  </div>
+  <div class="note" style="margin-top:14px">
+    <b>一句话总结</b>：RL 能超越的是"<b>你写下来的目标</b>"，超越不了"<b>你没写下来的东西</b>"。
+    这个项目里，写下来的目标是"快、省力、别撞墙"，它赢了；没写下来的是"4 N 持续侧向风下也要站住"，
+    它输了——直到我把它写进训练分布。
+  </div>
+</section>

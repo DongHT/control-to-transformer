@@ -1,0 +1,4 @@
+BC init        : {'success': 1.0, 't_up': 2.4385, 'th_rms': 0.0004, 'u_rms': 2.337, 'p_max': 0.0405, 'rail': 0.225}
+it   1  R=  132.24  std=0.55  succ=1.00 t_up= 2.28 th=0.0002 u= 2.18 rail=0.08  (7s)
+it   8  R=  142.01  std=0.54  succ=1.00 t_up= 2.18 th=0.0001 u= 2.12 rail=0.08  (53s)
+it  16  R=  150.78  std=0.53  succ=1.00 t_up= 2.20 th=0.0001 u= 2.06 rail=0.08  (105s)

@@ -1,0 +1,171 @@
+\chapter[反馈线性化]{第 3 讲\quad 部分反馈线性化：把"力"变成"加速度"}
+\label{ch:fbl}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 换一个坐标看同一台机器：把"我能施加多大力"换成"我能让小车产生多大加速度"。
+小车通道是完全驱动的，所以这个换元是\textbf{精确}的、全域可逆的。换完之后，
+后面所有控制器都只需要对付摆杆那一个非线性方程。\\[2pt]
+\textbf{前置}\quad 第 1 讲的状态方程；第 2 讲的"局部最优"概念。\\
+\textbf{视频}\quad 约 3 分钟。\quad\textbf{代码}\quad \texttt{build/controllers.py: cart\_inverse\_dynamics}。
+\end{quote}
+
+\section{为什么值得换坐标}
+
+回顾第 1 讲的两个方程：
+\begin{align}
+  (m_c+m_p\sin^2\theta)\,\ddot p &= u - b_c\dot p + m_p l\sin\theta\,\dot\theta^2
+     + b_p\cos\theta\,\dot\theta - m_p g\sin\theta\cos\theta,\\
+  \ddot\theta &= \frac{g\sin\theta - \ddot p\cos\theta - b_p\dot\theta/(m_p l)}{l}.
+\end{align}
+对控制器设计者来说，这两个式子很讨厌：摩擦、科氏项、重力耦合全混在一起，
+每设计一个控制律都要把这些项重新算一遍。
+
+但如果把视角从"力 $u$"换成"小车加速度 $\ddot p$"，情况完全不同：
+上式左端的分母恒正（第 1 讲命题 1），于是\textbf{对任意给定的 $\ddot p$，
+都有一个唯一的力与之对应}。把这件事写成映射：
+
+\begin{equation}
+  u = \underbrace{\big(m_c+m_p\sin^2\theta\big)}_{\text{等效质量}}\,\ddot p
+      + \underbrace{b_c\dot p - m_p l\sin\theta\,\dot\theta^2
+        - b_p\cos\theta\,\dot\theta + m_p g\sin\theta\cos\theta}_{\text{需要抵消的"干扰"}} .
+  \label{eq:inv}
+\end{equation}
+
+\keypoint{式 \eqref{eq:inv} 是\textbf{精确}的，不是近似。
+它把系统拆成两层：内层负责"抵消已知的非线性"，外层面对一个干净的输入 $v=\ddot p$。
+这就是\textbf{部分反馈线性化}（partial feedback linearization）——
+"部分"是因为只线性化了小车通道，摆杆通道依旧是非线性的。}
+
+\section{相对阶：为什么只挑小车通道}
+
+对输出 $y=p$，求导两次就出现 $u$（因为 $\ddot p$ 显含 $u$），所以相对阶是 2。
+对输出 $y=\theta$，有
+\begin{equation}
+  \ddot\theta = \frac{g\sin\theta - \ddot p\cos\theta}{l} - \frac{b_p\dot\theta}{m_p l^2},
+\end{equation}
+其中 $\ddot p$ 显含 $u$，但系数是 $\cos\theta$。因此\textbf{只要 $\cos\theta\ne0$，
+$\theta$ 的相对阶也是 2}。
+
+两个输出都是 2 阶，系统总阶是 4，输入只有 1 个。解耦矩阵
+\begin{equation}
+  \Delta(x) = \begin{bmatrix}
+    \dfrac{1}{m_c+m_p\sin^2\theta}\\[8pt]
+    \dfrac{-\cos\theta}{l\,(m_c+m_p\sin^2\theta)}
+  \end{bmatrix}\in\mathbb{R}^{2\times1}
+\end{equation}
+是一个\textbf{列向量}，秩恒为 1。所以不可能同时把 $\ddot p$ 和 $\ddot\theta$ 指定成任意值——
+这就是第 1 讲说过的欠驱动。工程上的处理是：\textbf{只线性化能线性化的那个通道，
+把另一个通道交给"能量"或"滑模"去管}。
+
+\section{反解之后系统长什么样}
+
+把 \eqref{eq:inv} 代入原方程，得到
+\begin{empheq}[box=\fbox]{align}
+  \ddot p &= v \qquad(\text{单位增益，精确线性化})\\
+  \ddot\theta &= \frac{g\sin\theta - v\cos\theta}{l}
+     - \frac{b_p\dot\theta}{m_p l^2}
+  \label{eq:after}
+\end{empheq}
+其中 $v$ 是新的控制输入（加速度指令）。
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{小车通道变成二重积分器}：$p^{(2)}=v$，这是控制理论里最好对付的对象。
+  \item \textbf{摆杆通道保留全部非线性}，但形式变干净了：只剩 $g\sin\theta$ 和 $v\cos\theta$，
+        以及一个很小的粘性项。后面第 4、5 讲都在这一个方程上做文章。
+\end{itemize}
+
+\section{精度验证}
+
+反解是解析的，所以精度只受两个因素影响：浮点误差与\textbf{限幅}。
+数值实验（$200$ 组随机状态与随机指令 $v$，用 $10^{-4}$\,s 步长估计实际 $\ddot p$）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+指标 & 数值 & 说明 \\
+\midrule
+最大误差 $|\ddot p - v|$ & $9.2\times10^{-4}$\,m/s$^2$ & 出现在指令被 $\pm12$\,N 限幅的样本 \\
+平均误差 & $2.2\times10^{-4}$\,m/s$^2$ & 相当于 $0.02\%$ 的相对误差 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+换句话说：\textbf{只要不加限幅，这个反解在数值上就是恒等式}。
+真正让"精确线性化"失效的不是数学，而是执行器——这一点在后续每一讲都会反复出现。
+\end{quote}
+
+\section{奇异点：摆杆通道会失去权限}
+
+式 \eqref{eq:after} 中 $\cos\theta$ 是 $v$ 的系数。当 $\theta\to\pm90^\circ$ 时：
+
+\begin{center}
+\small
+\begin{tabular}{@{}ccc@{}}
+\toprule
+$\theta$ & $\cos\theta$ & 小车加速度对 $\ddot\theta$ 的影响 \\
+\midrule
+$0^\circ$ & $1.00$ & 满权限 \\
+$30^\circ$ & $0.87$ & $87\%$ \\
+$60^\circ$ & $0.50$ & 一半 \\
+$80^\circ$ & $0.17$ & 几乎失效 \\
+$90^\circ$ & $0$ & \textbf{完全失效} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+这个表解释了一件重要的事：\textbf{摆杆水平时，无论小车怎么加速，都改变不了它的角加速度}。
+所以在第 5 讲的滑模控制器里，我们对 $\cos\theta$ 做了钳位（$|\cos\theta|\ge0.25$），
+并在 $\theta$ 较大时根本不使用依赖 $1/\cos\theta$ 的通道——那段交给摆起控制器。
+
+\section{"换坐标"到底带来多少好处}
+
+一个直接对照实验：同样的能量整定律 $v = k_E(E-E_d)\,\mathrm{sat}(\dot\theta\cos\theta/\phi)$，
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+实现方式 & 最佳 $k_E$ & 能把摆送到顶的比例 & 说明 \\
+\midrule
+直接调力（无力矩补偿） & $6.0$ & $0/3$ & 冷启动时摩擦与耦合项吃掉能量 \\
+加速度域（式 \eqref{eq:inv}） & $6.0$ & $3/3$ & 同一增益下全部成功 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+同一个控制律、同一个增益，只因为中间加了一层精确反解，就从"一个都上不去"变成"全部上去"。
+这不是玄学：能量泵的推导假设"$v$ 可以任意指定"，而直接调力时这个假设根本不成立。
+
+\keypoint{这就是"反馈线性化"的实际价值：它不是为了炫技，
+而是为了\textbf{让外环控制律的推导前提成立}。}
+
+\section{本讲小结}
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 小车通道完全驱动 $\Rightarrow$ 式 \eqref{eq:inv} 是精确反解，全域可逆。
+  \item 反解后系统变成 $p^{(2)}=v$ 加一个仍非线性的摆杆方程 \eqref{eq:after}。
+  \item 精度验证：不作限幅时反解误差 $\sim10^{-4}$，本质上是恒等式。
+  \item 奇异点：$\cos\theta\to0$ 时摆杆通道失去权限，必须显式处理。
+  \item 同一能量整定律，加了反解才能工作（$0/3\to3/3$）。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 从式 \eqref{eq:pdd_raw} 出发，独立推导 \eqref{eq:inv}，并验证各项符号。
+  \item 若改为指定摆杆加速度（令 $\ddot\theta=w$），反解会多出一个什么奇异项？
+        在什么角度附近数值上会爆炸？
+  \item 在式 \eqref{eq:inv} 中逐项去掉"干扰"（摩擦、科氏、重力耦合），
+        各做一次仿真，看能量泵的成功率下降多少。
+  \item 把 $\cos\theta$ 的钳位从 $0.25$ 改成 $0.1$ 与 $0.5$，观察滑模控制器给不出指令的角度范围。
+  \item （编程）用 $10^{-2}$ 到 $10^{-5}$ 的步长验证反解精度，画误差随步长的收敛曲线。
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item J.-J. Slotine, W. Li, \emph{Applied Nonlinear Control}, 第 6 章（输入–输出线性化与零动态）。
+  \item S. Fantoni, R. Lozano, \emph{Non-linear Control for Underactuated Mechanical Systems}, 第 2 章。
+\end{itemize}

@@ -1,0 +1,167 @@
+\chapter[DAgger 与评测]{第 9 讲\quad DAgger：把分布漂移修掉，并给出可验收的统计}
+\label{ch:dagger}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 第 7 讲证明了"BC 的误差会按 $T^2$ 累积"。
+本讲讲 DAgger 为什么能把它降到 $T$（给出定理与直觉），
+并用本用例的两轮实验验证；最后补上评测的统计学——置信区间、样本量、检查点偏差。\\[2pt]
+\textbf{前置}\quad 第 7 讲的分布漂移分析、第 8 讲的模型。\\
+\textbf{视频}\quad 约 3.5 分钟。\quad\textbf{代码}\quad \texttt{train.py: DAgger}、\texttt{eval\_all.py}。
+\end{quote}
+
+\section{把"分布漂移"写成公式}
+
+记专家的状态分布为 $d_{\pi^\star}$，策略的状态分布为 $d_{\pi_\theta}$。
+行为克隆最小化
+\begin{equation}
+  \epsilon_{\text{BC}}=\mathbb{E}_{s\sim d_{\pi^\star}}\big\|\pi_\theta(s)-\pi^\star(s)\big\| ,
+\end{equation}
+但闭环里实际承受的误差是在 $d_{\pi_\theta}$ 上取的：
+\begin{equation}
+  \epsilon_{\text{test}}=\mathbb{E}_{s\sim d_{\pi_\theta}}\big\|\pi_\theta(s)-\pi^\star(s)\big\| .
+  \label{eq:test}
+\end{equation}
+
+\begin{quote}
+\textbf{这两者的差就是全部问题。}若策略让状态偏出 $d_{\pi^\star}$ 的支撑集，
+式 \eqref{eq:test} 可能远大于 $\epsilon_{\text{BC}}$——而且我们在训练时根本看不到这些状态。
+\end{quote}
+
+\subsection{误差累积引理}
+
+设每一步策略误差 $\le\epsilon$，且系统在专家轨迹附近的 Lyapunov 指数为 $L$。
+由第 7 讲的 \eqref{eq:exp}，$t$ 步后偏差 $\lesssim\epsilon(e^{Lt}-1)/L$，
+对 $t=1..T$ 求和得到代价上界
+\begin{equation}
+  J(\pi_\theta)-J(\pi^\star)\ \le\ C\,\epsilon\,\frac{e^{LT}-1}{L^2}
+  \ \approx\ C\,\epsilon\,T^2\quad(LT\gg1).
+  \label{eq:t2}
+\end{equation}
+
+本课的量级：$T=600$ 步（$12$\,s）、$\epsilon\approx0.038$（归一化）$\to0.45$\,N。
+$T^2=3.6\times10^5$，乘上 $\epsilon$ 就是"必定失败"的量级——与实测的 $0/30$ 一致。
+
+\section{DAgger：把策略自己的状态放进训练集}
+
+\begin{enumerate}[leftmargin=2em,itemsep=3pt]
+  \item 用当前策略 $\pi_{\theta_i}$ 在闭环里跑，记录状态序列 $\{\hat s_t\}$；
+  \item 让专家在这些状态上标注 $a^\star_t=\pi^\star(\hat s_t)$；
+  \item 把 $\{(\hat s_t,a^\star_t)\}$ 并入数据集 $D_i$；
+  \item 在 $D_{i+1}=D_i\cup\{(\hat s_t,a^\star_t)\}$ 上重新训练。
+\end{enumerate}
+
+\subsection{为什么这能把 $T^2$ 降成 $T$}
+
+关键在于\textbf{训练分布逐步逼近测试分布}。形式化地（Ross 等，2011）：
+若在线学习器在第 $i$ 轮的平均 regret 为 $\epsilon_N$，则 DAgger 的 $N$ 轮平均策略满足
+\begin{equation}
+  \mathbb{E}_{s\sim d_{\pi}}[\ell(s,\pi)]\ \le\ \epsilon_N
+  + O\!\left(\frac{1}{N}\right),
+  \label{eq:noregret}
+\end{equation}
+从而总代价是 $O(\epsilon T)$，而非 $O(\epsilon T^2)$。
+
+直觉：BC 的错误会把你带到"训练集外"，然后那里的标签是\emph{猜的}；
+DAgger 让那些"训练集外"的状态\textbf{变成训练集的一部分}，于是不再有"外"。
+
+\begin{quote}
+注意 DAgger 需要的额外能力：\textbf{专家必须能对任意状态标注}，而不只是演示。
+本课满足这一点（专家是解析控制器）；若专家是人，标注成本就是 DAgger 的主要代价。
+\end{quote}
+
+\subsection{本用例的两轮}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+阶段 & 新增窗口 & 验证损失 & 闭环成功率 & 摆起时间 \\
+\midrule
+BC & -- & $1.45\times10^{-3}$ & $0/30$ & -- \\
+DAgger 1 & $26{,}460$ & $3.44\times10^{-3}$ & $30/30$ & $2.56$\,s \\
+DAgger 2 & $26{,}460$ & $3.38\times10^{-3}$ & $30/30$ & $2.68$\,s \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+验证损失\textbf{上升}是因为验证集仍是 BC 的分布，而新数据的分布更难拟合。
+用式 \eqref{eq:test} 的语言：$d_{\pi_\theta}$ 变宽了，$d_{\pi^\star}$ 没变，
+所以用旧分布算出来的数字不再代表新策略的能力。
+
+\section{评测的统计学}
+
+\subsection{成功率的置信区间}
+
+$30$ 次里成功 $30$ 次，成功率不是"$100\%$"，而是\textbf{一个区间}。
+Wilson 区间（$95\%$）：
+\begin{equation}
+  \hat p=\frac{k}{n},\qquad
+  \frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^2}}}{1+\frac{z^2}{n}} .
+\end{equation}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+观测 & 点估计 & $95\%$ Wilson 区间 \\
+\midrule
+$30/30$（DAgger） & $1.00$ & $[0.886,\ 1.000]$ \\
+$0/30$（BC） & $0.00$ & $[0.000,\ 0.114]$ \\
+$24/30$（某对照） & $0.80$ & $[0.627,\ 0.905]$ \\
+$48/60$ & $0.80$ & $[0.682,\ 0.882]$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{这就是为什么"$30/30 = 100\%$"不能直接与"$24/30 = 80\%$"比较}：
+两个区间有重叠，说明在 $n=30$ 下这个差别\emph{可能}只是抽样噪声。
+\end{quote}
+
+\subsection{需要多少样本}
+
+要在 $\alpha=0.05$、power $=0.8$ 下区分 $80\%$ 与 $100\%$：
+\begin{equation}
+  n\ \approx\ \frac{\big(z_{1-\alpha/2}\sqrt{\bar p(1-\bar p)}
+  +z_{\text{power}}\sqrt{p_1(1-p_1)}\big)^2}{(p_2-p_1)^2}\approx22 .
+\end{equation}
+$n=22$ 看起来很小，但这是"两组各 $22$"；而本课报告的是 $60$ 组，所以结论是稳的。
+
+\subsection{三个偏差来源}
+
+\begin{enumerate}[leftmargin=2em,itemsep=3pt]
+  \item \textbf{检查点选择偏差}：若用同一组初值挑最优检查点再报告它的成绩，等于偷看答案。
+        本课的做法是：在 $24$ 组\emph{验证初值}上挑检查点，在 $60$ 组\emph{测试初值}上报告。
+  \item \textbf{初值分布偏差}：$\theta_0$ 均匀 vs 集中在直立附近，成功率可以差一倍以上。
+        所以必须写清分布。
+  \item \textbf{指标口径偏差}："失败记 $99$\,s 计入均值"与"只统计成功回合"是两种均值。
+        本课所有表格都注明是哪一种。
+\end{enumerate}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 分布漂移的形式化：$\epsilon_{\text{BC}}$ 在 $d_{\pi^\star}$ 上取，$\epsilon_{\text{test}}$ 在 $d_{\pi_\theta}$ 上取。
+  \item 误差累积给出 $O(\epsilon T^2)$；DAgger 通过 no-regret 归约降到 $O(\epsilon T)$。
+  \item 本用例：两轮、各 $26{,}460$ 窗口，成功率 $0/30\to30/30$。
+  \item 成功率要给区间：$30/30$ 的 $95\%$ 区间是 $[0.886,1.000]$。
+  \item 三个偏差：检查点选择、初值分布、指标口径。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 用 $n=10,30,100$ 分别计算 $10/10$ 的 Wilson 区间，说明"小样本的 $100\%$"值多少。
+  \item 若 DAgger 每轮只跑 $20$ 个回合（而非 $140$），需要几轮？用实验回答并给出解释。
+  \item 设计一个"更公平"的验证集（提示：用策略自己的状态分布采样），并说明它的代价。
+  \item 证明式 \eqref{eq:t2} 的求和步骤，并指出 $L\to0$ 时上界应如何改写。
+  \item 若专家是人（无法对任意状态标注），有哪些替代方案？（提示：逆强化学习、安全探索）
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item S. Ross, G. Gordon, D. Bagnell, \emph{A reduction of imitation learning and structured
+        prediction to no-regret online learning}, AISTATS 2011.
+  \item E. B. Wilson, \emph{Probable inference, the law of succession, and statistical inference},
+        JASA 1927.（区间估计的原始文献）
+\end{itemize}

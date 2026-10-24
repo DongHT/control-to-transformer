@@ -1,0 +1,59 @@
+<section id="repro">
+  <h2><span class="n">07</span>复现方式</h2>
+  <p class="lead">
+    本页面是<strong>单文件、零依赖</strong>的：不请求任何 CDN、字体或图片，模型权重以 int8 内联在 HTML 里，
+    拷到任何浏览器（含离线环境）即可打开全部交互。
+  </p>
+
+  <div class="grid2" style="margin-top:16px">
+    <div class="card">
+      <h4>代码结构</h4>
+      <pre class="tree">transformer/
+├── index.html            ← 本页面（自包含）
+└── build/
+    ├── plant.py           拉格朗日模型 + RK4 仿真
+    ├── controllers.py     LQR / 能量整定 / 滑模 / 切换
+    ├── sweep.py           摆起参数网格搜索
+    ├── dataset.py         专家数据生成（含探索噪声）
+    ├── model.py           因果 Transformer 策略
+    ├── train.py           BC + DAgger 训练
+    ├── rl.py              PPO 微调（含域随机化开关）
+    ├── export.py          int8 量化 + 导出 + 校验向量
+    ├── export_rl.py       RL 权重导出 + 专家/BC/RL 四方对比
+    ├── eval_all.py        四控制器统一评测
+    ├── build.py           组装本文档
+    └── parts/             HTML 片段
+</pre>
+    </div>
+    <div class="card">
+      <h4>从头复现（约 25 分钟，CPU）</h4>
+      <pre class="tree">cd build
+python3 controllers.py     # 打印 LQR 增益与闭环极点
+python3 sweep.py           # 摆起增益网格搜索
+python3 train.py           # 数据 + 训练 + DAgger（300 s）
+python3 rl.py              # PPO 微调（约 9 min）
+                           #   再跑一次 dr=0.6 的域随机化版本（约 7 min）
+python3 export_rl.py       # 导出两个 int8 策略 + 四方对比
+python3 eval_all.py        # 60 组初值统一评测
+python3 build.py           # 生成 ../index.html</pre>
+      <p class="dim" style="margin-top:8px">依赖：numpy、scipy（仅用于解 CARE）、torch（CPU 版即可）。</p>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:16px">
+    <b>数据来源声明</b>：本文档中出现的一切数值都是本项目现场测得的，没有引用外部基准——
+    ① 第 02、05 节的表格与"能力边界"数字来自 <span class="mono">eval_all.py</span> 的 60 组随机初值；
+    ② 第 03 节的训练曲线来自 <span class="mono">out/train_log.json</span>；
+    ③ 第 04 节交互实验台的所有曲线、指标、注意力热图都是<strong>浏览器实时计算</strong>的，
+    与 Python 侧共用同一组微分方程与同一份 int8 权重。
+  </div>
+</section>
+
+<footer style="padding:34px 0 10px;color:var(--tx3);font-size:12.5px">
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <span>倒立摆非线性控制 × Transformer 数据驱动控制器 · 单页交互式技术报告</span>
+    <span class="mono">cart-pole · energy shaping · feedback linearization · SMC · causal transformer</span>
+  </div>
+</footer>
+
+</div><!-- /wrap -->

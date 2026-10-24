@@ -1,0 +1,218 @@
+\chapter[Transformer 策略]{第 8 讲\quad 因果 Transformer：从"软检索"推导到 int8 部署}
+\label{ch:tf}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 把"历史 $\to$ 动作"这个函数逼近问题做到底：
+为什么是注意力而不是 MLP/RNN、$QK^\top/\sqrt d$ 里的 $\sqrt d$ 从哪来、
+$18{,}177$ 个参数怎么一项项数出来、int8 量化误差的上界是多少。\\[2pt]
+\textbf{前置}\quad 第 7 讲的窗口与分布漂移；矩阵乘法与 softmax。\\
+\textbf{视频}\quad 约 4 分钟。\quad\textbf{代码}\quad \texttt{model.py}、\texttt{export.py}。
+\end{quote}
+
+\section{问题的形状}
+
+第 7 讲把控制器写成了
+\begin{equation}
+  \pi_\theta:\ \mathcal{H}_H=\mathbb{R}^{24\times6}\ \longrightarrow\ \mathcal{A}=\mathbb{R},
+  \qquad H=24 .
+\end{equation}
+输入是 $24$ 个 token，输出一个力。要逼近的函数有一个特殊结构：
+\textbf{输出需要按内容去"回看"某几个历史时刻}（哪一步是摆动的转折点？哪一步开始进入稳摆？）。
+这不是一个固定的加权平均，权重取决于当前状态。
+
+\section{注意力：把"回看"写成可微检索}
+
+\subsection{软检索}
+
+给定查询 $q\in\mathbb{R}^{d}$ 与一组键值对 $\{(k_t,v_t)\}_{t=1}^{H}$，
+硬检索是 $\arg\max_t q^\top k_t$（不可微）。把它软化：
+\begin{equation}
+  a_t=\frac{\exp(q^\top k_t/\sqrt{d})}{\sum_{s\le t}\exp(q^\top k_s/\sqrt{d})},
+  \qquad y=\sum_{t}a_t\,v_t .
+  \label{eq:attn}
+\end{equation}
+$a_t$ 就是"注意力"。$y$ 是值向量的加权平均，权重由查询与键的相似度决定。
+
+\subsection{$\sqrt{d}$ 是从哪来的}
+
+设 $q_i,k_i$ 独立、零均值、单位方差，则点积
+\begin{equation}
+  q^\top k=\sum_{i=1}^{d} q_ik_i
+  \ \Rightarrow\ \mathbb{E}[q^\top k]=0,\qquad
+  \mathrm{Var}(q^\top k)=d .
+\end{equation}
+所以点积的\textbf{标准差是 $\sqrt d$}。若不缩放，$d=8$（每头）时标准差 $2.83$，
+softmax 的输入分布过宽 $\Rightarrow$ 梯度接近 $0$（饱和）。除以 $\sqrt d$ 把方差归一化到 $1$，
+softmax 工作在梯度良好的区间。
+
+\begin{quote}
+这就是那个"经验上大家都这么写"的 $\sqrt d$ 的全部理由：\textbf{它是在补偿点积的方差增长}。
+如果没有这层理解，$\sqrt{d}$ 或 $\sqrt{d_k}$ 的写法会让人困惑。
+\end{quote}
+
+\subsection{因果掩码}
+
+本课要求"只能看过去"。实现上是在 softmax 之前把上三角位置置为 $-\infty$：
+\begin{equation}
+  M_{ts}=\begin{cases}0,& s\le t,\\ -\infty,& s>t,\end{cases}
+  \qquad
+  a_t=\mathrm{softmax}\big(q_t^\top K^\top/\sqrt d+M_t\big).
+\end{equation}
+$-\infty$ 经过 $\exp$ 变成 $0$，于是未来的权重严格为零。
+
+\begin{quote}
+\textbf{为什么训练时也要掩码？}因为部署时第 $t$ 步拿不到第 $t+1$ 个 token。
+若训练允许看未来，模型会学到一个"作弊解"，训练损失极低，部署立刻失效。
+\end{quote}
+
+\section{为什么不是 MLP 或 RNN}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+结构 & 参数（$24\times6\to1$） & 任意两步的"距离" & 备注 \\
+\midrule
+MLP 展平 & $144\,d_1+d_1d_2\cdots$ & 1 层 & 参数随 $H$ 线性增长 \\
+RNN & $O(d^2)$ & $O(|t-s|)$ 步 & 长程依赖指数衰减 \\
+注意力 & $O(d^2)$ 与 $H$ 无关 & $O(1)$（直接相连） & 并行计算 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+本课的 $d=32$：注意力的每层参数是 $4d^2+2d\cdot d_{\text{ff}}$，与 $H$ 无关；
+换成 MLP 展平，输入维数就是 $144$，第一层就要 $144\times d$。
+
+\section{参数量：一项一项数}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+组件 & 参数个数 \\
+\midrule
+输入投影 $\mathbb{R}^6\to\mathbb{R}^{32}$ & $6\times32+32=224$ \\
+位置编码 $24\times32$ & $768$ \\
+每层：LN1 & $2\times32=64$ \\
+每层：QKV 投影 $\mathbb{R}^{32}\to\mathbb{R}^{96}$ & $32\times96+96=3168$ \\
+每层：输出投影 $\mathbb{R}^{32}\to\mathbb{R}^{32}$ & $32\times32+32=1056$ \\
+每层：LN2 & $64$ \\
+每层：FFN $32\to64\to32$ & $(32\times64+64)+(64\times32+32)=4192$ \\
+\midrule
+单层小计 & $8544$ \\
+$2$ 层 & $17{,}088$ \\
+\midrule
+末端 LN & $64$ \\
+输出头 $\mathbb{R}^{32}\to\mathbb{R}$ & $33$ \\
+\midrule
+\textbf{合计} & $\mathbf{18{,}177}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+注意：$17{,}088+64+33+224+768=18{,}177$，与 \texttt{model.py} 打印的
+\texttt{sum(p.numel() for p in model.parameters())} 完全一致。
+
+\section{训练}
+
+目标函数（第 7 讲的归一化 MSE）：
+\begin{equation}
+  \mathcal{L}(\theta)=\frac{1}{N}\sum_{i=1}^{N}
+  \Big(\frac{\pi_\theta(\mathcal{H}^{(i)})}{u_{\max}}-\frac{u^{(i)}}{u_{\max}}\Big)^2 .
+\end{equation}
+
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{AdamW}：对每个参数做自适应步长，适合不同量级的权重（LN 参数在 $1$ 附近，投影矩阵在 $10^{-2}$）。
+  \item \textbf{OneCycle}：先升后降，峰值 $2\times10^{-3}$。$52$k 样本、$24$ epoch 下，
+        恒定学习率会在后期震荡。
+  \item \textbf{梯度裁剪 $1.0$}：个别批（初值恰好在下垂点附近）梯度很大，不裁剪会让训练跳飞。
+  \item \textbf{不用 dropout}：参数少（$18$k）、数据多（$52$k），实测 dropout 会让收敛变慢而无收益。
+\end{itemize}
+
+\section{部署：int8 量化的误差界}
+
+\subsection{仿射量化}
+
+对每个权重张量 $W$，取 $s=\max|W|/127$，量化
+\begin{equation}
+  q=\mathrm{round}(W/s)\in\mathbb{Z},\qquad \hat W=q\,s .
+\end{equation}
+单元素的误差满足
+\begin{equation}
+  |W-\hat W|\le s/2=\frac{\max|W|}{254}.
+\end{equation}
+
+\subsection{误差怎么传到输出}
+
+一层 $y=Wx+b$ 的输出误差
+\begin{equation}
+  \|\delta y\|_2\le\|\delta W\|_2\|x\|_2
+  \le \sqrt{n}\,\frac{s}{2}\,\|x\|_2 ,
+\end{equation}
+其中 $n$ 是该张量的元素个数。多层串联时误差会被 LayerNorm 部分吸收（它把每层输入重新归一化），
+所以\textbf{实际误差远小于最坏界}。
+
+实测：$18{,}177$ 个参数、$5$ 组真实窗口，单点最大偏差
+\begin{equation}
+  \max|\Delta u|=0.14\ \mathrm{N}=1.2\%\times u_{\max},
+\end{equation}
+闭环成功率不变，摆起时间 $2.70\to2.74$\,s。
+
+\subsection{推理成本}
+
+单步前向的乘加次数约 $2\times(224+768+2\times8544)\approx3.6\times10^{4}$，
+在浏览器（单线程 JS）上实测 $0.32$\,ms/步；$50$\,Hz 控制周期 $20$\,ms，
+占用约 $1.6\%$ 的时间预算。
+
+\section{它到底在看什么（实测）}
+
+统计闭环 $12$\,s 每一步、最后一个 token 在第 2 层的注意力（$4$ 头平均）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+阶段 & 等效跨度（步） & \textbf{峰值位置}（下标） & 峰值高度 & 最新 token 权重 \\
+\midrule
+摆起（$|\theta|>0.5$） & $20.1$ & $16.6$（中段） & $0.149$ & $0.136$ \\
+稳摆（$|\theta|<0.08$） & $18.1$ & $21.1$（最近第 2 步） & $0.219$ & $0.027$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+等效跨度用 $\exp(\text{注意力熵})$ 度量：均匀分布于 $24$ 个位置时等于 $24$。
+实测 $18$--$20$ 说明它\textbf{覆盖了大半个窗口}，但并不是均匀的——峰值可达 $0.15$--$0.22$。
+
+\begin{quote}
+\textbf{关键在峰值位置，不在加权重心。}重心两个阶段都在下标 $12.5$ 附近（几乎没变），
+但峰值从"窗口中段"移到了"最近第 2 步"：摆起时它在\textbf{估相位}（看整段斜坡的形状），
+稳摆时它在\textbf{估变化率}（只关心最近是否在动）。
+详细数据与推导见附录 A。
+\end{quote}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 注意力 = 软检索：$a_t\propto\exp(q_t^\top k_t/\sqrt d)$，$\sqrt d$ 来自点积方差 $=d$。
+  \item 因果掩码必须训练时就加，否则学到的解在部署时不可用。
+  \item 参数量逐项：$224+768+2\times8544+64+33=18{,}177$。
+  \item int8 的单元素误差 $\le\max|W|/254$，实测输出误差 $0.14$\,N（$1.2\%$）。
+  \item 注意力的\textbf{峰值位置}随阶段迁移：摆起在中段（估相位）、稳摆锁最近步（估变化率）。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 若把 $\sqrt d$ 换成 $d$，softmax 的最大值与最小值会差多少？用 $d=8$ 估算。
+  \item 把 $H$ 从 $24$ 改成 $12$，参数量变化多少？位置编码的变化占比是多少？
+  \item 推导：两层串联时，若每层输出误差 $\epsilon$，LayerNorm 能把误差放大压到多少？
+  \item 用逐通道（per-channel）量化替代逐张量，估算最大误差能降多少，并用代码验证。
+  \item 若把注意力改成双向（去掉掩码），训练损失会显著下降吗？为什么闭环会变差？
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item A. Vaswani et al., \emph{Attention is all you need}, NeurIPS 2017.
+  \item X. Wang et al., \emph{On the effect of layer normalization in transformers}, 2022.
+  \item M. Nagel et al., \emph{A white paper on neural network quantization}, 2021.
+\end{itemize}

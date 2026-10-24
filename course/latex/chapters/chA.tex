@@ -1,0 +1,318 @@
+\chapter[Transformer 内部机制]{附录 A\quad Transformer 控制器：前向、反向与注意力的完整解剖}
+\label{ch:inner}
+
+\begin{quote}\small
+\textbf{本附录目标}\quad 把第 8 讲的那个 $18{,}177$ 参数的网络拆到零件级：
+每一层的张量尺寸、每一步的前向公式、每一步的反向梯度、以及注意力与倒立摆运动的对应关系。
+所有数值都取自\textbf{真实权重与真实轨迹}（不是示意）。\\[2pt]
+\textbf{前置}\quad 第 7–9 讲；矩阵微积分（链式法则、softmax 的雅可比）。\\
+\textbf{视频}\quad 约 6 分钟。\quad\textbf{代码}\quad \texttt{model.py}、\texttt{export.py}、\texttt{chA\_experiments.py}。
+\end{quote}
+
+\section{全链路框图}
+
+\begin{center}
+\small
+\begin{tabular}{@{}clcl@{}}
+\toprule
+序号 & 运算 & 张量形状 & 参数量 \\
+\midrule
+1 & 输入窗口 & $24\times6$ & -- \\
+2 & 线性嵌入 $6\to32$ & $24\times32$ & $224$ \\
+3 & 加位置编码 & $24\times32$ & $768$ \\
+\midrule
+4 & LN1 & $24\times32$ & $64$ \\
+5 & QKV 投影 $\to 96$ & $24\times96$ & $3168$ \\
+6 & 分头 $4\times8$ & $4\times24\times8$ & -- \\
+7 & $QK^\top/\sqrt8$ + 因果掩码 & $4\times24\times24$ & -- \\
+8 & softmax（按行） & $4\times24\times24$ & -- \\
+9 & 加权求和 $AV$ & $4\times24\times8$ & -- \\
+10 & 合并 + 输出投影 & $24\times32$ & $1056$ \\
+11 & 残差 $+$ & $24\times32$ & -- \\
+\midrule
+12 & LN2 & $24\times32$ & $64$ \\
+13 & FFN $32\to64$ & $24\times64$ & $2112$ \\
+14 & GELU & $24\times64$ & -- \\
+15 & FFN $64\to32$ & $24\times32$ & $2080$ \\
+16 & 残差 $+$ & $24\times32$ & -- \\
+\midrule
+17 & （第 4--16 步重复一次） & $24\times32$ & $8544$ \\
+18 & 取最后一个 token & $32$ & -- \\
+19 & LN & $32$ & $64$ \\
+20 & 输出头 $32\to1$ & $1$ & $33$ \\
+21 & $u=12\tanh(\cdot)$ & 标量 & -- \\
+\midrule
+\multicolumn{3}{r}{合计} & $\mathbf{18{,}177}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{逐步前向：真实数值}
+
+取闭环第 $1.2$--$2.4$\,s 之间的一个真实窗口（摆起阶段），逐层打印中间量。
+
+\subsection{嵌入与位置编码}
+
+输入的最后一行（当前时刻 $k=24$）：
+\begin{equation}
+  x_k=[\sin\theta,\cos\theta,\dot\theta/4,\dot p/4,p/2.4,u_{k-1}/12] .
+\end{equation}
+线性嵌入后
+\begin{equation}
+  z_k=W_{\text{in}}x_k+b_{\text{in}}+\text{pos}_k\in\mathbb{R}^{32},
+  \qquad \|z_k\|_2=2.67 .
+\end{equation}
+位置编码是可学习的 $24\times32$ 矩阵——因为只有 $24$ 个位置，不需要正弦编码。
+
+\subsection{LayerNorm}
+
+\begin{equation}
+  \mu=\frac1d\sum_iz_i,\quad
+  \sigma^2=\frac1d\sum_i(z_i-\mu)^2,\quad
+  h=\frac{z-\mu}{\sqrt{\sigma^2+\varepsilon}}\odot\gamma+\beta .
+\end{equation}
+实测：$\mu=-0.014$、$\sigma^2=0.223$，于是放大因子
+\begin{equation}
+  \frac{1}{\sqrt{\sigma^2+\varepsilon}}=\frac{1}{\sqrt{0.223}}\approx2.12 .
+\end{equation}
+
+\begin{quote}
+注意 $\sigma^2$ 只有 $0.223$：说明嵌入向量的\textbf{动态范围很小}（因为输入都被归一化到 $[-2,2]$）。
+LayerNorm 把它放大 $2.1$ 倍后再送进注意力，这一步是必要的——否则注意力分数会挤在 $0$ 附近。
+\end{quote}
+
+\subsection{QKV 与分头}
+
+\begin{equation}
+  [Q;K;V]=h\,W_{\text{qkv}}^\top+b_{\text{qkv}}\in\mathbb{R}^{96},
+\end{equation}
+实测最后一刻：$\|q\|=3.41$、$\|k\|=3.88$、$\|v\|=2.95$（同一量级）。
+
+分头：把 $32$ 维切成 $4$ 份，每份 $8$ 维，各自做注意力，最后拼接。
+
+\subsection{因果掩码与 softmax}
+
+\begin{equation}
+  s_{ts}=\frac{q_t^\top k_s}{\sqrt 8}\quad(s\le t),\qquad
+  a_{ts}=\frac{e^{s_{ts}}}{\sum_{s'\le t}e^{s_{ts'}}} .
+\end{equation}
+实测（第 0 头、最后一个 token）：注意力前 $6$ 个位置为
+\begin{equation}
+  [\,0.040,\ 0.039,\ 0.042,\ 0.042,\ 0.044,\ 0.043\,],
+  \qquad \text{均匀值 }1/24=0.0417 .
+\end{equation}
+
+\begin{quote}
+\textbf{这组数字本身就是结论}：它和均匀分布差不到 $5\%$。
+也就是说，第 0 头几乎在"平均历史"，而不是"挑选某几步"。
+第 8 讲统计的"等效跨度 $18$--$20$ 步"正是这件事的定量表述。
+\end{quote}
+
+\subsection{加权求和、残差与 FFN}
+
+\begin{equation}
+  y_t=\sum_s a_{ts}v_s\in\mathbb{R}^{8}\ (\text{每头}),
+  \qquad
+  z\leftarrow z+\big(\text{Concat}(y^{(1..4)})W_{\text{proj}}^\top+b_{\text{proj}}\big).
+\end{equation}
+残差的量级：$\|z_k\|=2.67$、$\|\text{attn\_out}\|=0.88$、$\|z_k+\text{attn\_out}\|=2.79$。
+\textbf{注意力分支只贡献了约 $1/3$ 的幅度}——这也是训练初期不容易崩的原因。
+
+FFN：
+\begin{equation}
+  \text{FFN}(h)=W_2\,\mathrm{GELU}(W_1h+b_1)+b_2,
+  \qquad
+  \mathrm{GELU}(x)=\tfrac12x\big(1+\mathrm{erf}(x/\sqrt2)\big).
+\end{equation}
+实测 $64$ 个隐单元中有 $\mathbf{34}$ 个输入为负，GELU 把它们压到 $[-0.17,0)$ 之间——
+\textbf{只有约一半的容量在"活跃"}。这是 GELU 与 ReLU 的差别：它不是硬截断，而是软门控。
+
+\subsection{输出}
+
+\begin{equation}
+  u=12\tanh\!\big(w^\top\,\mathrm{LN}(z_{24})+b\big)=4.153\ \mathrm{N}.
+\end{equation}
+
+\section{反向传播：梯度怎么流回去}
+
+\subsection{损失与链式法则}
+
+用单样本平方损失（$u^\star$ 为标签）：
+\begin{equation}
+  \mathcal{L}=\tfrac12\big(u-u^\star\big)^2\ \Rightarrow\
+  \frac{\partial\mathcal{L}}{\partial u}=u-u^\star .
+\end{equation}
+以 $u=4.153$、$u^\star=5.153$（故意偏 $1$\,N）为例，$\partial\mathcal{L}/\partial u=1$，$\mathcal{L}=0.5$。
+
+\subsection{输出层的梯度}
+
+$u=12\tanh(r)$，$r=w^\top z_L+b$：
+\begin{equation}
+  \frac{\partial u}{\partial r}=12\,(1-\tanh^2 r),\qquad
+  \frac{\partial\mathcal{L}}{\partial r}=\frac{\partial\mathcal{L}}{\partial u}\cdot12\,(1-\tanh^2r).
+\end{equation}
+\begin{quote}
+$\tanh$ 的导数是 $1-\tanh^2$，当 $|u|$ 接近 $12$ 时它趋于 $0$——\textbf{饱和}。
+实测 $u=4.153$ 时 $1-\tanh^2\approx0.88$，还没有饱和；但若策略一直输出接近 $\pm12$，
+梯度会消失。这是"输出层用 $\tanh$ 限幅"的代价。
+\end{quote}
+
+\subsection{LayerNorm 的梯度}
+
+设 $y=\mathrm{LN}(z)$。记 $\hat z=(z-\mu)/\sigma$，则
+\begin{equation}
+  \frac{\partial\mathcal{L}}{\partial z}
+  =\frac{\gamma}{\sigma}\Big(\frac{\partial\mathcal{L}}{\partial y}
+   -\frac1d\sum_j\frac{\partial\mathcal{L}}{\partial y_j}
+   -\frac{\hat z}{d}\sum_j\frac{\partial\mathcal{L}}{\partial y_j}\hat z_j\Big).
+\end{equation}
+括号里两项是\textbf{减均值与减投影}——它们让 LN 的梯度天然正交于"整体平移"和"整体缩放"方向。
+这正是 Pre-LN 结构稳定的原因：残差路径上的梯度不会被 LN 放大。
+
+\subsection{Softmax 的雅可比}
+
+\begin{equation}
+  \frac{\partial a_i}{\partial s_j}=a_i(\delta_{ij}-a_j)
+  \quad\Longrightarrow\quad
+  \frac{\partial\mathcal{L}}{\partial s_j}=a_j\Big(\frac{\partial\mathcal{L}}{\partial a_j}
+   -\sum_i a_i\frac{\partial\mathcal{L}}{\partial a_i}\Big).
+\end{equation}
+注意括号里的第二项：它是"加权平均梯度"，起到了\textbf{自动减基线}的作用。
+当注意力接近均匀（$a_i\approx1/24$）时，这一项几乎抵消掉大部分梯度——
+\textbf{注意力越均匀，梯度越小}，这也是"注意力塌缩"难训练的原因。
+
+\subsection{注意力的完整反传}
+
+\begin{align}
+  \frac{\partial\mathcal{L}}{\partial V}&=A^\top\frac{\partial\mathcal{L}}{\partial Y},&
+  \frac{\partial\mathcal{L}}{\partial A}&=\frac{\partial\mathcal{L}}{\partial Y}V^\top,\\
+  \frac{\partial\mathcal{L}}{\partial Q}&=\frac{1}{\sqrt d}\Big(\frac{\partial\mathcal{L}}{\partial S}\Big)K,&
+  \frac{\partial\mathcal{L}}{\partial K}&=\frac{1}{\sqrt d}\Big(\frac{\partial\mathcal{L}}{\partial S}\Big)^\top Q,
+\end{align}
+其中 $\partial\mathcal{L}/\partial S$ 由上一段的 softmax 雅可比给出（掩码位置恒为 $0$）。
+
+\subsection{本用例的梯度量级（实测）}
+
+对上述样本做一次反向，各参数张量的梯度范数：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+张量 & $\|\partial\mathcal{L}/\partial W\|_2$ \\
+\midrule
+\texttt{head.weight} & $52.16$ \\
+\texttt{blocks.0.proj.weight} & $19.88$ \\
+\texttt{blocks.0.fc2.weight} & $14.66$ \\
+\texttt{blocks.0.qkv.weight} & $13.74$ \\
+\texttt{blocks.1.fc1.weight} & $13.24$ \\
+\texttt{blocks.1.qkv.weight} & $12.94$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{读法}：输出头最大（直接对着损失），越往里越小，但\textbf{衰减并不剧烈}（$52\to13$，只有 $4$ 倍）。
+这得益于两点：残差让梯度有"高速公路"，Pre-LN 让每层的输入尺度一致。
+如果去掉残差，第 0 层的梯度会小一到两个数量级。
+\end{quote}
+
+\subsection{参数更新}
+
+AdamW 的更新式（含解耦权重衰减）：
+\begin{align}
+  m_t&=\beta_1m_{t-1}+(1-\beta_1)g_t,&
+  v_t&=\beta_2v_{t-1}+(1-\beta_2)g_t^2,\\
+  \theta_t&=\theta_{t-1}-\eta\Big(\frac{\hat m_t}{\sqrt{\hat v_t}+\varepsilon}
+   +\lambda\theta_{t-1}\Big),
+\end{align}
+其中 $\hat m_t=m_t/(1-\beta_1^t)$、$\hat v_t=v_t/(1-\beta_2^t)$。
+本课 $\eta$ 由 OneCycle 调度，$\lambda=10^{-4}$。
+
+\section{注意力与倒立摆运动：把两条时间轴对起来}
+
+把闭环 $12$\,s 的每一步都记录：状态 $(\theta,p)$、输出 $u$、窗口里的 $\cos\theta$ 历史、
+以及最后一个 token 在\textbf{第 2 层}的注意力（$4$ 头平均，$24$ 维）。
+
+\subsection{统计}
+
+按阶段统计最后一个 token 在第 2 层的注意力（$4$ 头平均，$24$ 维）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+阶段 & 样本 & 等效跨度 & \textbf{峰值位置} & 峰值高度 & 最新 token 权重 \\
+\midrule
+摆起（$|\theta|>0.5$） & $74$ & $20.1$ & $16.6$（窗口中段） & $0.149$ & $0.136$ \\
+稳摆（$|\theta|<0.08$） & $459$ & $18.1$ & $\mathbf{21.1}$（最近第 2 步） & $0.219$ & $0.027$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+按两秒一段看峰值位置的迁移：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+时间段 & $0$--$2$\,s & $2$--$4$\,s & $4$--$6$\,s & $6$--$8$\,s & $8$--$10$\,s & $10$--$12$\,s \\
+\midrule
+峰值位置 & $16.2$ & $13.9$ & $22.0$ & $22.0$ & $22.0$ & $22.0$ \\
+等效跨度 & $20.1$ & $20.0$ & $18.3$ & $18.1$ & $18.1$ & $18.1$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{这里有一个很容易看错的地方。}如果只看"关注重心"（加权平均位置），两个阶段几乎一样
+（$12.6$ 与 $12.4$），会得出"它不换挡"的结论。但看\textbf{峰值位置}就完全不同：
+摆起阶段峰值在窗口中段（下标 $14$--$16$，即 $0.16$--$0.2$\,s 前），
+稳摆阶段峰值锁定在	extbf{最近第 2 步}（下标 $22$）。
+\end{quote}
+
+两点解读：
+
+\begin{enumerate}[leftmargin=2em,itemsep=3pt]
+  \item \textbf{摆起阶段＝相位估计}：摆正在快速越过顶部，$\cos\theta$ 的历史是一段陡坡，
+        它把权重摊在整段斜坡上（等效跨度 $20$ 步），峰值落在斜坡中段——
+        这正是"这段摆动从哪开始、朝哪个方向"的信息所在。
+  \item \textbf{稳摆阶段＝变化率估计}：$\cos\theta$ 几乎是一条平线，需要的是"有没有在动"，
+        于是注意力收紧到最近一步（峰值下标 $22$，等效跨度降到 $18.1$），
+        并且对最新 token 的权重从 $0.136$ 掉到 $0.027$——它不再需要"最新那一帧"的瞬时值。
+\end{enumerate}
+
+\subsection{怎么看这张图}
+
+把注意力当成"对过去 $0.48$\,s 的权重分布"叠在倒立摆动画旁边看：
+动画到摆起段时，注意力是"宽而偏中"的一座丘；动画到稳摆段时，它变成"窄而靠右"的一根针。
+\textbf{这两种形态对应两类信息需求}——相位，与变化率。
+
+\section{本附录小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 全链路 $21$ 个算子、$18{,}177$ 个参数，每个形状都可以手算核对。
+  \item 前向的真实数值：$\|z\|=2.67$、LN 放大 $2.12$ 倍、注意力 $\approx1/24$、GELU 有一半单元被压掉。
+  \item 反向：softmax 雅可比自带"减基线"，LN 雅可比正交于平移与缩放，残差给梯度修了高速公路。
+  \item 梯度量级实测：输出头 $52.2$、第 0 层 $13$--$20$，衰减仅 $4$ 倍。
+  \item 注意力的\textbf{峰值位置}会换挡：摆起在中段（下标 $16.6$）、稳摆锁最近第 2 步（下标 $21.1$）；
+        只看加权重心会被骗（$12.6$ vs $12.4$），必须看峰值。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 手算：$\sigma^2=0.223$ 时，LN 把幅值为 $1$ 的向量放大到多少？若 $\sigma^2=2.23$ 呢？
+  \item 验证 softmax 雅可比的行和为 $0$，并解释它对梯度的影响。
+  \item 若把 $\tanh$ 换成硬裁剪（$\mathrm{clip}(r,-12,12)$），损失对 $r$ 的梯度会变成什么？
+  \item 去掉残差（把 $z\leftarrow z+\cdots$ 改成 $z\leftarrow\cdots$），
+        重跑一次反向，比较第 0 层梯度范数的变化。
+  \item 用记录的数据画出"注意力重心随时间"的曲线，看它在模式切换附近有没有跳变。
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item X. Wang et al., \emph{On the effect of layer normalization in transformers}, 2022.
+  \item D. Bahdanau et al., \emph{Neural machine translation by jointly learning to align and translate}, ICLR 2015.
+  \item L. Dong et al., \emph{Attention is not all you need: pure attention loses rank doubly exponentially}, ICML 2021.
+\end{itemize}

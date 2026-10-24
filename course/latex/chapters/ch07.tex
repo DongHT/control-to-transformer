@@ -1,0 +1,229 @@
+\chapter[数据与模仿]{第 7 讲\quad 数据与模仿：把控制器变成函数逼近问题}
+\label{ch:data}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 从原理上讲清三件事：
+（1）为什么控制问题可以写成监督学习，以及\textbf{为什么它不是普通的监督学习}；
+（2）为什么输入必须是"历史窗口"，窗口多长才够；
+（3）分布漂移为什么会毁掉一个拟合得很好的策略——给出定量估计，并用本用例的数字验证。\\[2pt]
+\textbf{前置}\quad 第 1 讲的线性化与不稳定特征值；第 6 讲的切换控制器（它将成为"专家"）。\\
+\textbf{视频}\quad 约 4 分钟。\quad\textbf{代码}\quad \texttt{dataset.py}、\texttt{train.py}。
+\end{quote}
+
+\section{为什么这是监督学习问题}
+
+先给一个容易忽略的事实：对确定性 MDP，最优策略可以写成\textbf{状态}的函数
+\begin{equation}
+  \pi^\star:\ \mathcal{S}\to\mathcal{A},\qquad
+  \pi^\star(s)=\arg\max_a Q^\star(s,a),
+\end{equation}
+所以"从数据学一个控制器"等价于"用函数逼近器拟合 $\pi^\star$"。这是我们敢用监督学习的前提。
+
+\subsection{但为什么它不是普通监督学习}
+
+普通监督学习假设样本独立同分布、训练分布 = 测试分布。控制问题两条都不满足：
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{样本强相关}：相邻两帧只差 $20$\,ms，几乎是同一个点。
+  \item \textbf{训练分布由专家决定，测试分布由策略自己决定}：
+        \begin{equation}
+          \text{训练分布 } d_{\pi^\star}(s)\quad\ne\quad \text{测试分布 } d_{\pi_\theta}(s).
+          \label{eq:dist}
+        \end{equation}
+\end{enumerate}
+
+式 \eqref{eq:dist} 是后面一切麻烦的根源。第 9 讲的 DAgger 就是专门修它的。
+
+\subsection{还有第三个坑：专家有记忆}
+
+第 6 讲的混合控制器有\textbf{内部模式}（摆起 / 稳摆）。同一个状态
+$(\theta,\dot\theta)=(0.1,0)$ 在两种模式下会给出完全不同的动作：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+状态 & 模式 & 输出力 & 直觉 \\
+\midrule
+$(0.1,\,0)$ & 摆起 & 泵能量（较大） & "我还在甩" \\
+$(0.1,\,0)$ & 稳摆 & LQR（较小） & "已经稳住了" \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+所以 $\pi^\star$ \textbf{不是状态的函数}，而是"状态 + 历史"的函数。严格地说，
+这是一个\textbf{部分可观测}（POMDP）问题：真实状态里有一个我们看不到的隐变量（模式）。
+
+\keypoint{结论：网络的输入不能是单帧状态，必须是\textbf{一段历史}。
+历史上的每一个 token 都可能携带"我现在处于什么模式"的线索。}
+
+\section{历史窗口作为充分统计量}
+
+\subsection{为什么窗口能替代隐状态}
+
+若隐状态在有限步内可由观测历史重建，则长度 $H$ 的窗口就是\textbf{近似充分统计量}。
+对本课的被控对象，有两层理由：
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{状态本身已含二阶信息}：$(\theta,\dot\theta,p,\dot p)$ 是完整的连续状态，
+        所以窗口不是为了补全状态，而是为了识别\textbf{控制器模式}。
+  \item \textbf{模式切换是滞后事件}：模式由 $|\theta|,|\dot\theta|$ 与上一次模式共同决定，
+        而"上一次模式"的信息藏在过去 $0.3$--$0.5$\,s 的轨迹里。
+\end{enumerate}
+
+\subsection{$H=24$ 的定量依据}
+
+摆动周期（小角度）：
+\begin{equation}
+  T_{\text{swing}}\approx 2\pi\sqrt{l/g}=2\pi\sqrt{0.6/9.81}\approx1.55\ \mathrm{s}.
+\end{equation}
+$H=24$ 对应 $24\times0.02=0.48$\,s，约为周期的 $1/3$。
+
+\begin{quote}
+\textbf{为什么 $1/3$ 个周期够？}因为我们不需要完整周期来估计相位，
+只需要区分"正在上升"与"正在下落"——这两个在 $(\theta,\dot\theta)$ 上已经可分。
+窗口真正要解决的是\textbf{模式的多义性}，而模式切换的时间尺度约 $0.2$--$0.4$\,s，
+$0.48$\,s 刚好覆盖。
+\end{quote}
+
+\subsection{采样与混叠}
+
+$50$\,Hz 采样对应 Nyquist 频率 $25$\,Hz。本系统的最高角速度约 $8$\,rad/s $=1.3$\,Hz，
+远低于 Nyquist；力矩也没有高频成分（$\sigma$ 噪声是白噪声，但我们在标签里不采它）。
+所以\textbf{不存在混叠}，$50$\,Hz 是安全的。
+
+\section{监督目标：我们到底在最小化什么}
+
+行为克隆最小化
+\begin{equation}
+  \hat\theta=\arg\min_\theta\ \mathbb{E}_{s\sim d_{\pi^\star}}
+  \big\|\pi_\theta(s)-\pi^\star(s)\big\|^2 .
+  \label{eq:bc}
+\end{equation}
+
+注意期望的下标：$s\sim d_{\pi^\star}$，\textbf{专家走过的状态}。
+
+\subsection{闭式解是条件均值}
+
+对平方损失，最优解是条件均值 $\pi_\theta(s)=\mathbb{E}[a\mid s]$。
+这里有一个隐患：\textbf{若同一状态下专家动作是多峰的（例如噪声让"该不该泵能量"摇摆），
+条件均值会给出两个峰之间的动作，而那个动作往往是错的}。
+
+本课的数据里，探索噪声 $\sigma=1.5$\,N 确实把动作分布"抹宽"了。我们用一条折中：
+标签取\textbf{未加噪的专家动作}，噪声只作用于执行（改变状态分布），不进入标签。
+这样条件分布保持单峰，均值解是安全的。
+
+\subsection{归一化为什么重要}
+
+损失里用 $u/u_{\max}$ 而不是牛顿：四个状态通道的量级从 $10^{-2}$ 到 $10^{0}$，
+若直接回归牛顿数，梯度会被大动作样本主导。
+归一化后实测：动作标签均值 $-0.012$、标准差 $0.257$，六个输入通道都落在 $[-2.1,2.1]$。
+
+\section{分布漂移：定量估计}
+
+\subsection{为什么误差会自己长大}
+
+把闭环写成 $x_{t+1}=f(x_t,\pi_\theta(x_t))$，在专家轨迹附近线性化：
+\begin{equation}
+  \delta x_{t+1}\approx J\,\delta x_t,\qquad
+  J=\frac{\partial f}{\partial x}+\frac{\partial f}{\partial u}\frac{\partial \pi_\theta}{\partial x}.
+\end{equation}
+若闭环有一个 Lyapunov 指数 $L>0$，则单步误差 $\epsilon$ 在 $t$ 步后放大为
+\begin{equation}
+  \|\delta x_t\|\ \lesssim\ \epsilon\,\frac{e^{Lt}-1}{L}.
+  \label{eq:exp}
+\end{equation}
+
+本课的 $L$ 从哪来？第 2 讲算过：LQR 的闭环极点最慢一对是 $-0.90\pm0.47j$，
+但那是\emph{设计好的}闭环。真正决定"误差放大"的是\textbf{专家没有覆盖到的方向}：
+第 1 讲的开环正根 $+4.00$ 在这些方向上没有被完全镇住。取 $L\approx4.0$，
+误差的时间常数 $1/4=0.25$\,s。
+
+\subsection{经典界：$T^2$ 与 $T$}
+
+Ross \& Bagnell (2010) 给出：若每步动作误差 $\le\epsilon$，则 $T$ 步累计代价满足
+\begin{equation}
+  \underbrace{J(\pi_{\text{BC}})\le J(\pi^\star)+O(\epsilon T^2)}_{\text{行为克隆}},
+  \qquad
+  \underbrace{J(\pi_{\text{DAgger}})\le J(\pi^\star)+O(\epsilon T)}_{\text{DAgger}}.
+  \label{eq:regret}
+\end{equation}
+
+直觉：BC 的错误一旦发生，之后的每一步都在"越来越陌生的状态"上决策，
+误差按 $t$ 累计一次、再按 $t$ 步累计一次 $\Rightarrow T^2$。
+DAgger 把策略自己的状态也放进训练集，误差不再累积，只剩线性项。
+
+\subsection{本用例的实测}
+
+用同一初值 $(\theta_0=\pi-0.14)$ 让三条轨迹跑 $8$\,s，逐步比较与专家的角度偏差：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+策略 & 首次超过 $0.15$\,rad & $8$\,s 末偏差 & 说明 \\
+\midrule
+纯 BC（$24$ epoch） & $\mathbf{0.10}$\,s & $0.652$\,rad & 几乎立刻跑偏 \\
+BC + DAgger 2 轮 & 从未 & $0.0016$\,rad & 与专家同步 \\
+专家 + $0.45$\,N 动作噪声 & -- & $2.52$\,rad & 同样的"量级误差"但每步被拉回 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+第三行是关键对照：\textbf{同样 $0.45$\,N 的动作误差，如果每步都被专家纠正，
+系统不会跑偏（虽然轨迹会不同）}。所以问题不在"误差大小"，而在"\textbf{误差之后没有纠正}"。
+
+\section{数据覆盖：噪声该加多大}
+
+探索噪声 $\sigma$ 决定数据集在状态空间的"宽度"。一阶估计：
+\begin{equation}
+  \Delta \theta\ \approx\ \frac{\partial \theta}{\partial u}\,\sigma\ \cdot\ \tau,
+\end{equation}
+其中 $\tau$ 是误差持续的时间尺度。取 $\sigma=1.5$\,N、$\partial\theta/\partial u\sim0.05$\,rad/N、
+$\tau\sim4$\,s，得到 $\Delta\theta\sim0.3$\,rad——刚好覆盖 LQR 吸引域（$0.64$\,rad）的一半。
+
+\begin{center}
+\small
+\begin{tabular}{@{}ccc@{}}
+\toprule
+$\sigma$ [N] & 数据覆盖 & 现象 \\
+\midrule
+$0.2$ & 极窄 & 策略只会沿着专家那条细线走 \\
+$1.5$ & 约 $0.3$\,rad 宽 & 本课采用 \\
+$4.0$ & 很宽但标签噪声大 & 同一状态出现矛盾标签 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 确定性 MDP 的最优策略是状态的函数，所以可以用监督学习逼近；
+        但闭环控制器有\textbf{记忆}，所以输入必须是历史窗口。
+  \item $H=24$（$0.48$\,s）覆盖约 $1/3$ 个摆动周期，足够识别模式，不存在混叠。
+  \item BC 最小化的是 $\mathbb{E}_{s\sim d_{\pi^\star}}$ 上的误差，测试分布却是 $d_{\pi_\theta}$。
+  \item 误差放大满足 $\|\delta x_t\|\lesssim \epsilon(e^{Lt}-1)/L$，$L\approx4$ 时时间常数 $0.25$\,s。
+  \item 理论界：BC $O(\epsilon T^2)$、DAgger $O(\epsilon T)$；
+        实测纯 BC 在 $0.10$\,s 就跑偏，DAgger 版与专家同步到 $0.0016$\,rad。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 若把专家换成一个\textbf{无记忆}的控制器（例如纯 LQR），
+        窗口是否还需要 $24$ 步？用实验说明最小可用 $H$。
+  \item 用式 \eqref{eq:exp} 估计：$L=4$、$\epsilon=0.45$\,N 等效的角度误差 $0.03$\,rad 时，
+        偏差超过 $0.15$\,rad 需要多少步？与实测的 $0.10$\,s 比较。
+  \item 证明：若动作分布是双峰的，条件均值解给出的动作会落在两峰之间，
+        并构造一个本课的具体状态例子。
+  \item 设计一个实验：把噪声只加在标签上（不加在执行上），看闭环表现如何变化。
+  \item 把 $50$\,Hz 降到 $20$\,Hz，窗口长度换算成秒会变吗？对相位估计有什么影响？
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item S. Ross, D. Bagnell, \emph{Efficient reductions for imitation learning}, AISTATS 2010.
+  \item S. Ross, G. Gordon, D. Bagnell, \emph{A reduction of imitation learning ...},
+        AISTATS 2011.（$O(\epsilon T^2)$ 与 $O(\epsilon T)$ 两个界的出处）
+  \item P. Abbeel, A. Ng, \emph{Apprenticeship learning via inverse reinforcement learning}, ICML 2004.
+\end{itemize}

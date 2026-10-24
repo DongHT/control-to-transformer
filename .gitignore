@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# 中间产物（可重新生成）
+course/out/_work/
+course/video/assets/mathcache/
+*.aiff
+
+# 模型检查点保留，训练日志保留；临时探针文件忽略
+build/out/probe_*.npy

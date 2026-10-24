@@ -1,0 +1,173 @@
+\chapter[能量整定]{第 4 讲\quad 能量整定：把"摆起来"变成标量目标}
+\label{ch:energy}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 用一个标量（能量）代替"姿态轨迹"，让摆从下垂自己甩到竖直附近。
+给出控制律、Lyapunov 证明、以及一个真实的工程坑：小车会跑。\\[2pt]
+\textbf{前置}\quad 第 3 讲的加速度域 $p^{(2)}=v$。\\
+\textbf{视频}\quad 约 3 分钟。\quad\textbf{代码}\quad \texttt{controllers.py: EnergyFBL}。
+\end{quote}
+
+\section{能量通道}
+
+在第 3 讲的加速度域里，摆杆方程是
+\begin{equation}
+  \ddot\theta=\frac{g\sin\theta-v\cos\theta}{l}-\frac{b_p\dot\theta}{m_p l^2}.
+\end{equation}
+定义摆杆相对直立静止的能量
+\begin{equation}
+  E=\tfrac12 m_p l^2\dot\theta^2+m_p g l(\cos\theta-1),
+  \label{eq:E}
+\end{equation}
+求导并代入上式，得到这一讲最重要的一个式子：
+\begin{equation}
+  \boxed{\;\dot E=-m_p l\,(\dot\theta\cos\theta)\,v-b_p\dot\theta^2\;}
+  \label{eq:dE}
+\end{equation}
+
+\begin{quote}
+\textbf{读法}：$v$ 与 $\dot\theta\cos\theta$ 是一对"功"的共轭量。
+只要让加速度与 $\dot\theta\cos\theta$ 同号，能量就上升；反号就下降。
+\textbf{控制能量，就是控制这一对量的相位。}
+\end{quote}
+
+\section{控制律与 Lyapunov 证明}
+
+取
+\begin{equation}
+  v=k_E\,(E-E_d)\,\mathrm{sat}\!\left(\frac{\dot\theta\cos\theta}{\phi}\right)
+   -k_x p-k_d\dot p,\qquad E_d=0 .
+  \label{eq:law}
+\end{equation}
+忽略阻尼项与回中项，代入 \eqref{eq:dE}：
+\begin{align}
+  \dot E &= -m_p l\,k_E (E-E_d)\,(\dot\theta\cos\theta)\,
+            \mathrm{sat}\!\left(\frac{\dot\theta\cos\theta}{\phi}\right)\\
+         &= -m_p l\,k_E (E-E_d)\,\big|\dot\theta\cos\theta\big|\,
+            \Big|\mathrm{sat}(\cdot)\Big| \;\le 0 \quad(\text{当 } E>E_d).
+\end{align}
+取 $W=\tfrac12(E-E_d)^2$，则
+\begin{equation}
+  \dot W=(E-E_d)\dot E
+  =-m_p l\,k_E\,(E-E_d)^2\,\big|\dot\theta\cos\theta\big|\,\big|\mathrm{sat}(\cdot)\big|\le0 .
+\end{equation}
+
+\begin{quote}
+$W$ 单调不增，故 $E\to E_d$。收敛速度正比于 $|\dot\theta\cos\theta|$——
+\textbf{摆不动的时候泵不进能量}，这既是物理事实，也是后面的坑。
+\end{quote}
+
+\section{LaSalle 与"下垂陷阱"}
+
+用 LaSalle 不变集原理：$\dot W=0$ 要求 $|\dot\theta\cos\theta|=0$，即
+$\dot\theta=0$ 或 $|\cos\theta|=0$。能长期停留的不变集有两个：
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item $\theta=0,\ \dot\theta=0$：\textbf{直立静止}，$E=0=E_d$ ✓ 目标；
+  \item $\theta=\pi,\ \dot\theta=0$：\textbf{下垂静止}，$E=-2m_pgl\ne E_d$ ✗ 陷阱。
+\end{enumerate}
+
+第二个是\\textbf{测度为零的对称点}：真实系统任何微小扰动都会打破它。
+工程上的处理是让"下垂"这个初值永远带上一点偏差（本课用 $\theta_0=\pi-0.14$），
+或者加一个极小的抖动项（dither）。
+
+\section{为什么必须加"小车回中"}
+
+式 \eqref{eq:law} 的前半段只关心能量，完全不关心小车在哪。仿真里会发生两件事：
+
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 泵能量需要小车持续加速，于是\textbf{小车被越推越远}；
+  \item 一旦撞墙（位置钳位、速度清零），能量泵就断了——摆还没到顶就失去动力。
+\end{enumerate}
+
+所以必须加 $-k_xp-k_d\dot p$。但这两个系数不能大：\textbf{回中本身在消耗能量}。
+表 \ref{tab:kx} 是本课的实测（固定 $k_E=6$，三个初值）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}ccc@{}}
+\toprule
+$k_x/k_d$ & 平均摆起时间 & 平均 $|p|_{\max}$ \\
+\midrule
+$0.35\,/\,0.45$ & 未抓到（$>15$\,s） & $1.42$\,m \\
+$0.90\,/\,1.30$ & $3.6$\,s & $1.85$\,m \\
+$1.30\,/\,1.90$ & $3.1$\,s & $2.37$\,m \\
+\bottomrule
+\end{tabular}
+\captionof{table}{回中增益的权衡：太弱赶不上，太强撞墙。}
+\label{tab:kx}
+\end{center}
+
+\section{增益 $k_E$：泵多快，撞多狠}
+
+$k_E$ 决定"一次摆动能泵入多少能量"，是本讲最关键的参数。实测（三个初值平均）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}cccc@{}}
+\toprule
+$k_E$ & 平均摆起时间 & 平均 $|p|_{\max}$ & 结果 \\
+\midrule
+$1.0$ & $>15$\,s & $0.81$\,m & 泵得太慢，15\,s 内抓不住 \\
+$2.0$ & $>15$\,s & $1.25$\,m & 同上 \\
+$3.0$ & $>15$\,s & $1.62$\,m & 同上 \\
+$4.0$ & $>15$\,s & $1.94$\,m & 同上 \\
+$6.0$ & $3.13$\,s & $2.37$\,m & 可用（接近导轨极限） \\
+$8.0$ & $2.35$\,s & $2.60$\,m & 撞墙（超过 $2.4$\,m） \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+这条曲线不是单调的"越大越好"：\textbf{泵得越猛，摆起越快，但小车走得越远}。
+$k_E=6$ 是"刚好能在导轨内完成一次摆起"的临界点附近——这也是本课最终选它的原因。
+
+\section{实测：一次完整的摆起}
+
+从 $\theta_0=\pi-0.14$ 出发，闭环 $12$\,s 的关键数字：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+指标 & 数值 \\
+\midrule
+能量初值 & $-2.93$\,J（下垂）\\
+能量峰值 & $+0.026$\,J（略有过冲，随后被 LQR 拉回 0）\\
+首次进入 $|\theta|<0.1$\,rad & $1.98$\,s \\
+$|p|_{\max}$ & $2.37$\,m（离导轨极限还有 3\,cm）\\
+稳态 $|\theta|$ & $<10^{-3}$\,rad \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+注意"能量峰值 $+0.026$"这个细节：能量控制\textbf{不会精确停在 0}，
+它会把摆"抛过头"一点点，然后由第 6 讲的切换器接管。这正是"摆起"和"稳摆"必须分开的原因。
+\end{quote}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 能量导数 $\dot E=-m_p l(\dot\theta\cos\theta)v-b_p\dot\theta^2$ 把控制问题变成"相位"问题。
+  \item $W=\tfrac12(E-E_d)^2$ 是合法 Lyapunov 函数，$W$ 单调不增。
+  \item LaSalle 给出两个不变集：直立的（目标）与下垂的（陷阱）。
+  \item 回中项必须"慢"，$k_E$ 必须"刚好"：$k_E$ 太小抓不住，太大撞墙。
+  \item 摆起完成时能量会略微过冲，需要局部稳定器接管 —— 引出第 5、6 讲。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 从 \eqref{eq:E} 出发独立推导 \eqref{eq:dE}，说明 $-b_p\dot\theta^2$ 项的来源。
+  \item 若去掉 $\mathrm{sat}(\cdot)$ 直接用 $\mathrm{sign}(\cdot)$，会发生什么？用仿真验证抖振。
+  \item 证明：当 $E<E_d$ 时 \eqref{eq:law} 的第一个因子为负，因此 $v$ 与 $\dot\theta\cos\theta$ 反号。
+  \item 把 $\phi$ 从 $0.05$ 调到 $1.0$，观察摆起时间与力的平滑度如何变化。
+  \item 设计一个"自适应 $k_E$"：当 $|p|>1.8$\,m 时降低泵增益，看能否避免撞墙。
+  \item （编程）复现表 4.2 的 $k_E$ 扫描，并画出"摆起时间–撞墙率"的帕累托前沿。
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item K. J. Åström, K. Furuta, \emph{Swinging up a pendulum by energy control}, Automatica 36(2), 2000.
+  \item M. W. Spong, \emph{Energy based control of a class of underactuated mechanical systems}, IFAC 1996.
+\end{itemize}

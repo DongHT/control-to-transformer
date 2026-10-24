@@ -1,0 +1,130 @@
+\chapter[切换与监督]{第 6 讲\quad 切换与监督：把两种局部真理缝起来}
+\label{ch:switch}
+
+\begin{quote}\small
+\textbf{本讲目标}\quad 第 4 讲会甩、不会停；第 5 讲会停、不会甩。本讲把两者缝成一个控制器，
+并讲清楚缝合处的三个工程问题：捕获窗口、迟滞带宽、切换瞬态。\\[2pt]
+\textbf{前置}\quad 第 4 讲（能量）、第 5 讲（滑模或 LQR）。\\
+\textbf{视频}\quad 约 2.5 分钟。\quad\textbf{代码}\quad \texttt{controllers.py: Hybrid}。
+\end{quote}
+
+\section{两种"局部真理"}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & 能量整定（第 4 讲） & 局部稳定器（第 2/5 讲）\\
+\midrule
+擅长 & 大偏差：从任意角度把摆甩到顶上 & 小偏差：把误差压到 $10^{-3}$\,rad \\
+不擅长 & 到顶后停不住（能量会过冲） & 角度一大模型就失效（吸引域外）\\
+目标 & 把 $E$ 推到 $0$ & 把 $x$ 压到 $0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+两者互补，但\textbf{没有任何一个连续的反馈律能同时做到}（因为目标函数不同）。
+所以必须\textbf{显式切换}。
+
+\section{捕获窗口：多大才接得住}
+
+切换的第一件事是定义"什么时候交给稳定器"。直觉是"$\theta$ 足够小的时候"，
+但"足够小"到底是多少？实测（4 组初值，$15$\,s 闭环）：
+
+\begin{center}
+\small
+\begin{tabular}{@{}cccc@{}}
+\toprule
+捕获阈值 $\theta_{\mathrm{in}}$ & 成功回合 & 说明 \\
+\midrule
+$0.25$\,rad & $0/4$ & 太窄：能量控制把摆"抛过"了竖直位置，接不住 \\
+$0.35$\,rad & $4/4$ & 刚好 \\
+$0.45$\,rad & $4/4$ & 更宽松，但仍然稳定 \\
+$0.60$\,rad & $4/4$ & 接近 LQR 吸引域边界（$0.64$\,rad） \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{$0.25$\,rad 会全军覆没}，这件事很反直觉：窗口越窄，看起来越"安全"，实际越糟。
+原因是能量控制到达顶点附近时，摆的速度不为零，$|\theta|<0.25$ 的时间窗可能只有几十毫秒——
+而第 4 讲说过，切换是\textbf{在采样的瞬间发生的}，采样周期 $20$\,ms，
+窗口太窄就会"看漏"。
+\end{quote}
+
+本课取 $\theta_{\mathrm{in}}=0.40$\,rad、$|\dot\theta|_{\mathrm{in}}=2.5$\,rad/s。
+
+\section{迟滞：防止在边界上抖}
+
+如果进入和退出用同一组阈值，噪声会让模式在临界点附近高频切换。做法是
+\textbf{进出用不同阈值}：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & 进入稳摆 & 退回摆起 \\
+\midrule
+$|\theta|$ & $<0.40$ & $>0.80$ \\
+$|\dot\theta|$ & $<2.5$ & $>3.5$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+这两个区间之间的"死区"就是迟滞带。带宽太窄→抖振；太宽→摆已经掉下去了还在用 LQR。
+
+\section{切换瞬态：$11$\,N 的单步跳变}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+控制器 & 切换次数 & 最大单步 $\Delta u$ & 首次到顶 \\
+\midrule
+能量 + LQR & $1$ & $11.0$\,N & $1.98$\,s \\
+能量 + SMC & $1$ & $10.9$\,N & $1.90$\,s \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+$11$\,N 的跳变意味着：切换那一帧，执行器的指令几乎从满幅正转到满幅负。
+对真实电机，这是一次电流冲击；对仿真，它只是"不好看"。
+\textbf{第 10 讲会看到，模仿学习学到的策略把这一跳变压到了 $5.4$\,N}——
+这是数据驱动方法在本项目里唯一明确的优势。
+
+\section{监督器设计清单}
+
+把上面的经验固化成一张检查表，任何"多模式控制器"都适用：
+
+\begin{enumerate}[leftmargin=2em,itemsep=3pt]
+  \item \textbf{进入条件必须能被采样到}：切换窗口的时间宽度 $\gg$ 采样周期。
+  \item \textbf{进入后必须落在稳定器的吸引域内}：用第 2 讲的 basin 图核对。
+  \item \textbf{要有迟滞}：进入/退出用不同阈值，死区宽度由噪声量级决定。
+  \item \textbf{要限幅}：切换瞬间的跳变要过一遍速率限制器（$\Delta u$ 上限）。
+  \item \textbf{要有回退}：稳定器失效（$|\theta|$ 超过阈值）时退回摆起，而不是硬撑。
+\end{enumerate}
+
+\section{本讲小结}
+\begin{enumerate}[leftmargin=2em,itemsep=2pt]
+  \item 能量控制与局部稳定器的目标函数不同，必须显式切换。
+  \item 捕获窗口 $\theta_{\mathrm{in}}=0.40$\,rad：$0.25$ 太窄会"看漏"，$0.6$ 接近 basin 边界。
+  \item 迟滞带（$0.40/0.80$、$2.5/3.5$）是抗抖振的必要代价。
+  \item 切换瞬态 $\Delta u\approx11$\,N，需要速率限制或平滑过渡。
+  \item 这套"监督器清单"是后续数据驱动部分的对标对象。
+\end{enumerate}
+
+\section*{习题}
+\addcontentsline{toc}{section}{习题}
+\begin{enumerate}[leftmargin=2em,itemsep=6pt]
+  \item 计算：若采样周期为 $20$\,ms，摆通过 $|\theta|<0.25$ 的时间窗在多快的角速度下会小于一个采样周期？
+  \item 把迟滞带改为 $(0.40,\,0.42)$，统计每秒切换次数，解释抖振的成因。
+  \item 在切换处加一个一阶速率限制器（$|\Delta u|\le4$\,N/step），看摆起时间增加多少。
+  \item 设计一个"软切换"：用 $\sigma(\theta)$ 作为权重做凸组合，而不是硬切换，比较两者的 $\Delta u$。
+\end{enumerate}
+
+\section*{延伸阅读}
+\addcontentsline{toc}{section}{延伸阅读}
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item A. S. Morse (ed.), \emph{Control Using Logic-Based Switching}, Springer, 1997.
+  \item D. Liberzon, \emph{Switching in Systems and Control}, Birkhäuser, 2003.
+\end{itemize}

@@ -1,0 +1,213 @@
+<section id="classical">
+  <h2><span class="n">02</span>传统非线性控制器：先"讲道理"，再"稳得住"</h2>
+  <p class="lead">
+    目标是从<strong>下垂静止</strong>出发，把摆甩起来并稳定在直立（不需要人扶、不靠试错）。
+    难点在于：局部线性控制器（LQR）只会"扶住已经差不多立起来的摆"，一旦倾角很大就完全失效；
+    而纯能量控制只会"甩"，甩到顶也停不住。经典解法是<strong>分工 + 切换</strong>：
+    大偏差时做能量整定（非线性），小偏差时切到局部稳定器。
+  </p>
+
+  <div class="card" style="margin:20px 0;padding:10px">
+    <svg viewBox="0 0 1080 250" width="100%" height="auto" role="img" aria-label="控制器结构框图">
+      <defs>
+        <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 z" fill="#63849c"/>
+        </marker>
+        <marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 z" fill="#2fd3c0"/>
+        </marker>
+      </defs>
+      <!-- input -->
+      <text x="18" y="126" fill="#93a5b8" font-size="12" font-family="ui-monospace">x = [p, θ, ṗ, θ̇]</text>
+      <line x1="120" y1="120" x2="176" y2="120" stroke="#63849c" stroke-width="1.5" marker-end="url(#a2)"/>
+      <!-- supervisor -->
+      <rect x="180" y="82" width="150" height="76" rx="10" fill="#16212d" stroke="#e0619e" stroke-width="1.4"/>
+      <text x="255" y="110" fill="#e0619e" font-size="13" text-anchor="middle">切换监督器</text>
+      <text x="255" y="130" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">|θ|&lt;0.40 ∧ |θ̇|&lt;2.5</text>
+      <text x="255" y="147" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">迟滞：|θ|&gt;0.80 ∨ |θ̇|&gt;3.5</text>
+      <!-- two branches -->
+      <line x1="330" y1="100" x2="392" y2="62" stroke="#63849c" stroke-width="1.5" marker-end="url(#a2)"/>
+      <line x1="330" y1="140" x2="392" y2="182" stroke="#63849c" stroke-width="1.5" marker-end="url(#a2)"/>
+      <rect x="396" y="30" width="230" height="64" rx="10" fill="#16212d" stroke="#f2a93b" stroke-width="1.4"/>
+      <text x="511" y="57" fill="#f2a93b" font-size="13" text-anchor="middle">① 能量整定（摆起）</text>
+      <text x="511" y="77" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">v = k_E(E−E_d)sat(θ̇cosθ/φ)−k_x p−k_d ṗ</text>
+      <rect x="396" y="150" width="230" height="64" rx="10" fill="#16212d" stroke="#2fd3c0" stroke-width="1.4"/>
+      <text x="511" y="177" fill="#2fd3c0" font-size="13" text-anchor="middle">② 局部稳定器（稳摆）</text>
+      <text x="511" y="197" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">LQR：u=−Kx &nbsp;|&nbsp; SMC：s=θ̇+λ(θ−θ_ref)</text>
+      <!-- energy estimator -->
+      <rect x="396" y="240" width="230" height="0" fill="none"/>
+      <line x1="176" y1="120" x2="176" y2="222" stroke="#63849c" stroke-dasharray="3 4"/>
+      <line x1="176" y1="222" x2="392" y2="222" stroke="#63849c" stroke-dasharray="3 4" marker-end="url(#a2)"/>
+      <text x="200" y="238" fill="#63788d" font-size="10.5" font-family="ui-monospace">E(x)=½m_p l²θ̇²+m_p g l(cosθ−1)</text>
+      <!-- fbl -->
+      <line x1="626" y1="62" x2="672" y2="96" stroke="#63849c" stroke-width="1.5" marker-end="url(#a2)"/>
+      <line x1="626" y1="182" x2="672" y2="148" stroke="#63849c" stroke-width="1.5" marker-end="url(#a2)"/>
+      <rect x="676" y="82" width="176" height="80" rx="10" fill="#101c22" stroke="#2fd3c0" stroke-width="1.4"/>
+      <text x="764" y="108" fill="#2fd3c0" font-size="13" text-anchor="middle">小车通道反解</text>
+      <text x="764" y="126" fill="#93a5b8" font-size="10.5" text-anchor="middle" font-family="ui-monospace">p̈ ← v （精确线性化）</text>
+      <text x="764" y="144" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">u = f⁻¹(x, v)，再限幅 ±12 N</text>
+      <!-- plant -->
+      <line x1="852" y1="122" x2="906" y2="122" stroke="#2fd3c0" stroke-width="1.5" marker-end="url(#a3)"/>
+      <rect x="910" y="92" width="150" height="60" rx="10" fill="#16212d" stroke="#57a8f5" stroke-width="1.4"/>
+      <text x="985" y="118" fill="#57a8f5" font-size="13" text-anchor="middle">倒立摆</text>
+      <text x="985" y="136" fill="#63788d" font-size="10.5" text-anchor="middle" font-family="ui-monospace">ẋ = f(x,u)</text>
+      <!-- feedback -->
+      <path d="M985,152 L985,232 L255,232 L255,158" fill="none" stroke="#63849c" stroke-width="1.3"
+            stroke-dasharray="4 4" marker-end="url(#a2)"/>
+      <text x="600" y="248" fill="#63788d" font-size="10.5" font-family="ui-monospace">状态反馈</text>
+    </svg>
+  </div>
+
+  <h3>第 0 步：线性基线 LQR（用来划出"能力边界"）</h3>
+  <p>
+    在直立点线性化后解连续时间代数 Riccati 方程，得到状态反馈增益。
+    取 <span class="mono">Q = diag(1, 40, 1, 2)</span>（重罚角度）、<span class="mono">R = 0.05</span>：
+  </p>
+  <div class="eq">
+    u <span class="op">=</span> −K (x − x<sub>ref</sub>)<span class="op">,</span>&nbsp;&nbsp;
+    K <span class="op">=</span> [ −4.47 &nbsp; −66.71 &nbsp; −8.60 &nbsp; −16.22 ]
+    <span class="tag">闭环极点：−11.9, −4.47, −1.09 ± 0.43j</span>
+  </div>
+  <p>
+    LQR 在 θ 小范围内表现极好（0.25 rad 出发约 0.3 s 收进 |θ|&lt;0.02 rad），但它<strong>没有"摆起"概念</strong>：
+    从下垂位置出发，它会用 12 N 硬推、把小车推到撞墙，摆仍然立不起来。
+    下面的实验台里你可以亲自选 <span class="pill bl">LQR</span> 从垂下拉一下——这就是"为什么需要非线性控制"的现场证据。
+  </p>
+  <div class="note warn">
+    <b>能力边界（实测）</b>：在 60 组随机初始条件下（θ₀ 在 ±π 均匀分布、p₀ ∈ ±1 m），
+    LQR 的成功率只有 <b>27%</b>，而且 82% 的回合撞到导轨末端——它只对"已经在直立附近"的初值有效。
+  </div>
+
+  <h3>第 1 步：部分反馈线性化——把"力"变成"加速度"</h3>
+  <p>
+    小车通道是完全驱动的（分母恒为正），因此可以<strong>精确</strong>反解出产生指定加速度
+    <span class="i">v</span> 所需的力：
+  </p>
+  <div class="eq">
+    u <span class="op">=</span> (m<sub>c</sub>+m<sub>p</sub> sin²θ)·v
+    + b<sub>c</sub> ṗ − m<sub>p</sub> l sinθ·θ̇² − b<sub>p</sub> cosθ·θ̇ + m<sub>p</sub> g sinθ cosθ
+    <span class="tag">Inverse dynamics of the cart channel</span>
+  </div>
+  <p>
+    代入后系统等价于"<span class="mono">p̈ = v</span> + 摆杆方程"。这不是把整个系统线性化
+    （摆杆仍然是非线性的），而是<strong>把控制器设计从力域搬到加速度域</strong>：
+    内环吃掉摩擦、科氏项、重力耦合这些"已知的脏活"，外环只需面对一个干净的二阶非线性。
+    这是后面能量整定与滑模的共同基础。
+  </p>
+
+  <h3>第 2 步：能量整定（Energy Shaping）——"甩起来"</h3>
+  <p>在加速度域上，能量对时间的导数具有非常干净的形式（对 θ 方程求导代入）：</p>
+  <div class="eq">
+    Ė <span class="op">=</span> − m<sub>p</sub> l (θ̇ cos θ) · v − b<sub>p</sub> θ̇²
+    <span class="tag">能量通道</span>
+  </div>
+  <p>
+    可见 <span class="mono">v</span> 与 <span class="mono">θ̇ cos θ</span> 是"功"的一对共轭量：
+    想让能量上升，就让加速度与 <span class="mono">θ̇ cos θ</span> 同相位推。于是取
+  </p>
+  <div class="eq">
+    v <span class="op">=</span> k<sub>E</sub> (E − E<sub>d</sub>) · sat( θ̇ cos θ / φ )
+    − k<sub>x</sub> p − k<sub>d</sub> ṗ<span class="op">,</span>&nbsp;&nbsp;E<sub>d</sub> = 0
+    <span class="tag">能量整定律 + 小车回中</span>
+  </div>
+  <p>忽略阻尼项与回中项，代入可得能量误差的<strong>单调衰减</strong>：</p>
+  <div class="eq">
+    W <span class="op">=</span> ½(E − E<sub>d</sub>)²<span class="op">,</span>&nbsp;&nbsp;
+    Ẇ <span class="op">=</span> −k<sub>E</sub> m<sub>p</sub> l (E − E<sub>d</sub>)² |θ̇ cos θ| · sat(·)
+    <span class="op">≤</span> 0
+    <span class="tag">Lyapunov 函数单调不增</span>
+  </div>
+  <p>
+    即 <span class="i">W</span> = (E − E_d)²/2 是一个合法的 Lyapunov 函数，能量误差只能下降。
+    由 LaSalle 不变集原理，收敛点只有两个：<strong>直立静止</strong>（E = 0，正是目标）与
+    <strong>下垂静止</strong>（E = −2m<sub>p</sub>gl，但因为 <span class="mono">θ̇ cosθ ≡ 0</span> 而成为退化不变集）。
+    后者是测度为零的"完美对称陷阱"，实际系统里任何微小扰动都会打破它——所以实验台里的"下垂"预设给的是
+    <span class="mono">θ₀ = π − 0.14</span>，而不是数学上严格对称的 π。
+  </p>
+  <div class="note">
+    <b>为什么还要 −k<sub>x</sub>p − k<sub>d</sub>ṗ？</b>能量整定本身完全不管小车会跑到哪里去——
+    它会一边泵能量一边把小车"推着走"。两个线性项相当于一个很慢的外环，把小车拉回导轨中部；
+    但增益必须远小于能量泵的增益，否则"回中"这个动作本身会持续消耗能量，把摆卡在某个中间幅度上。
+    这也是这组参数（k<sub>E</sub>=6.0 vs k<sub>x</sub>=1.3）最花时间调的地方。
+  </div>
+
+  <h3>第 3 步：切换监督器——两种"局部真理"的缝合</h3>
+  <p>
+    能量控制的极限行为是"绕直立点做暂态运动"，它<strong>不会停在里面</strong>；
+    局部稳定器能停住，但只在 |θ| 小的时候有效。于是用一个带迟滞的状态机：
+  </p>
+  <div class="eq small">
+    摆起 <span class="op">→</span> 稳摆：&nbsp;|θ| &lt; 0.40 rad <b>且</b> |θ̇| &lt; 2.5 rad/s
+    &nbsp;&nbsp;&nbsp;<span class="op">|</span>&nbsp;&nbsp;&nbsp;
+    稳摆 <span class="op">→</span> 摆起：&nbsp;|θ| &gt; 0.80 rad <b>或</b> |θ̇| &gt; 3.5 rad/s
+    <span class="tag">迟滞带宽 = 抗抖振</span>
+  </div>
+  <p>
+    迟滞是必要的：若进出用同一组阈值，噪声会让控制器在临界点附近高频切换，
+    造成力和"模式"的抖振。给进入判据留一个较宽的边界（0.40/0.80），
+    既保证"抓得住"（落入 LQR 的吸引域），又保证不会一秒切十次。
+  </p>
+
+  <h3>第 4 步：滑模稳定器（SMC）——把鲁棒性做成结构</h3>
+  <p>
+    LQR 是"完全相信模型"的线性反馈；如果模型不准或存在外部扰动，它的性能会明显退化。
+    滑模控制换一个思路：<strong>先规定一条必须到达的流形，再用力把状态按死在流形上。</strong>
+  </p>
+  <div class="eq">
+    s <span class="op">=</span> θ̇ + λ (θ − θ<sub>ref</sub>)<span class="op">,</span>&nbsp;&nbsp;
+    ṡ <span class="op">=</span> − η · sat(s/φ) − k<sub>s</sub> s
+    <span class="tag">滑模面 + 到达律</span>
+  </div>
+  <p>
+    把 <span class="mono">θ̈ = (g sinθ − v cosθ)/l</span> 代入并解出所需的 <span class="mono">v</span>：
+  </p>
+  <div class="eq">
+    v <span class="op">=</span>
+    <span style="display:inline-block;vertical-align:middle">
+      <span style="border-bottom:1px solid #3d5164;padding:0 8px">
+        g sinθ + l [ λ θ̇ + η·sat(s/φ) + k<sub>s</sub> s ]
+      </span><br><span style="padding:0 8px">cos θ</span>
+    </span>
+    <span class="tag">1/cosθ 奇异 → 本实现钳位到 |cosθ| ≥ 0.25</span>
+  </div>
+  <p>
+    三个工程细节决定了它能不能落地：<br>
+    <b>① 边界层</b>：用 <span class="mono">sat(s/φ)</span> 代替 <span class="mono">sign(s)</span>，
+    牺牲"有限时间到达"换取<strong>无抖振</strong>；<span class="mono">φ</span> 就是"多快算到达"的带宽。<br>
+    <b>② 奇异钳位</b>：<span class="mono">1/cosθ</span> 在水平位置发散，把 |cosθ| 钳到 0.25 保证控制量有界
+    （反正这个区域已经交给摆起模式了）。<br>
+    <b>③ 小车回中</b>：单输入无法同时独立指定 p 与 θ，SMC 用一个"倾斜参考"
+    <span class="mono">θ<sub>ref</sub> = −clip(k<sub>p</sub>p + k<sub>d</sub>ṗ, ±0.25)</span>
+    搭一个时间尺度分离的外环——让快速的摆杆回路去追踪一个极小的倾角偏置，从而间接推动小车回中。
+    若直接把 <span class="mono">−k<sub>x</sub>p − k<sub>d</sub>ṗ</span> 加到 <span class="mono">v</span> 上，
+    两个回路会在同一个输入上"抢方向盘"，实测会直接发散。
+  </p>
+  <div class="note">
+    <b>鲁棒性从哪来</b>：外部推力 <span class="mono">d</span> 叠加在 <span class="mono">u</span> 上
+    （matched disturbance），它会通过 <span class="mono">p̈</span> 进入 <span class="mono">ṡ</span>。
+    只要 <span class="mono">η</span> 大于扰动的等效强度，到达律就能"压住"它。
+    下面的实验台里，你可以给两种控制器各加 4 N 的持续侧向风：稳态<strong>角度</strong>误差是
+    0.014 rad（LQR 版）对 0.006 rad（SMC 版）。但要顺便注意另一件事——两者都没有积分项，
+    所以风力同时把小车推离中心，加到 6~8 N 时小车会被推到导轨尽头：
+    <strong>鲁棒性只解决了"角度"这一半问题</strong>。
+  </div>
+
+  <h3>设计参数总表</h3>
+  <table>
+    <thead><tr><th>模块</th><th>参数</th><th>取值</th><th>物理含义</th></tr></thead>
+    <tbody>
+      <tr><td>LQR</td><td class="num">Q / R</td><td class="num">diag(1,40,1,2) / 0.05</td><td style="text-align:left" class="dim">重罚角度、轻罚力 → 激进但快</td></tr>
+      <tr><td>能量整定</td><td class="num">k<sub>E</sub></td><td class="num">6.0</td><td style="text-align:left" class="dim">能量泵增益，越大摆起越快、越易撞墙</td></tr>
+      <tr><td>能量整定</td><td class="num">φ</td><td class="num">0.20 rad/s</td><td style="text-align:left" class="dim">相位死区，抑制低速时的抖振</td></tr>
+      <tr><td>能量整定</td><td class="num">k<sub>x</sub> / k<sub>d</sub></td><td class="num">1.30 / 1.90</td><td style="text-align:left" class="dim">小车回中（慢时间尺度）</td></tr>
+      <tr><td>切换</td><td class="num">(θ<sub>in</sub>, θ̇<sub>in</sub>)</td><td class="num">(0.40, 2.5)</td><td style="text-align:left" class="dim">进入稳摆的捕获窗口</td></tr>
+      <tr><td>切换</td><td class="num">(θ<sub>out</sub>, θ̇<sub>out</sub>)</td><td class="num">(0.80, 3.5)</td><td style="text-align:left" class="dim">退回摆起的迟滞阈值</td></tr>
+      <tr><td>SMC</td><td class="num">λ / η / k<sub>s</sub></td><td class="num">6.0 / 12.0 / 1.0</td><td style="text-align:left" class="dim">滑模面斜率 / 到达律强度 / 线性项</td></tr>
+      <tr><td>SMC</td><td class="num">φ / k<sub>p</sub> / k<sub>d</sub></td><td class="num">0.25 / 0.18 / 0.22</td><td style="text-align:left" class="dim">边界层 / 倾斜参考的回中增益</td></tr>
+    </tbody>
+  </table>
+  <p class="dim">
+    以上全部参数都是我在仿真里用网格搜索定的（摆起成功时间 vs 导轨占用），不是抄来的"标准值"；
+    详见 <span class="mono">build/sweep.py</span>。
+  </p>
+</section>

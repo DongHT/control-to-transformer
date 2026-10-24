@@ -1,0 +1,237 @@
+<section id="lab">
+  <h2><span class="n">04</span>交互实验台：五个控制器，同一台倒立摆</h2>
+  <p class="lead">
+    下面所有内容都在你的浏览器里实时计算：被控对象用页面内实现的 RK4 积分器（与 Python 侧同一套方程、同一 dt），
+    控制器是四份真实实现，Transformer 用的是上面导出的 int8 权重。
+    拖动初值、加扰动、改速度，甚至让五个控制器（含 RL 微调版）同时在同一个初值下赛跑。
+  </p>
+
+  <div class="lab">
+    <!-- ============ toolbar ============ -->
+    <div class="lab-bar">
+      <div class="seg" id="modeSeg">
+        <button data-mode="single" class="on">单控制器（看细节）</button>
+        <button data-mode="compare">五路同步对比</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn primary" id="btnPlay">▶ 运行</button>
+      <button class="btn" id="btnStep">单步 +0.1 s</button>
+      <button class="btn" id="btnReset">↺ 重置</button>
+      <label class="mini">速度 <input type="range" id="speed" min="0.25" max="2" step="0.25" value="1"><b id="speedV">1.0×</b></label>
+    </div>
+
+    <div class="lab-main">
+      <!-- ============ left: scene + chips ============ -->
+      <div class="lab-left">
+        <div class="chips" id="ctrlChips">
+          <button class="chip" data-c="lqr"><i style="--c:#57a8f5"></i>LQR<span class="sub">线性基线</span></button>
+          <button class="chip on" data-c="elqr"><i style="--c:#2fd3c0"></i>Energy+LQR<span class="sub">主控制器</span></button>
+          <button class="chip" data-c="esmc"><i style="--c:#f2a93b"></i>Energy+SMC<span class="sub">鲁棒版</span></button>
+          <button class="chip" data-c="tf"><i style="--c:#e0619e"></i>Transformer<span class="sub">模仿专家</span></button>
+          <button class="chip" data-c="tfrl"><i style="--c:#8ff0e2"></i>+ RL 微调<span class="sub">PPO+DR</span></button>
+        </div>
+
+        <div class="scene-wrap">
+          <canvas id="scene" height="300"></canvas>
+          <div class="scene-hud">
+            <span class="badge" id="roMode">摆起</span>
+            <span class="badge dim" id="roRail">导轨安全</span>
+            <span class="badge dim" id="roCost">策略推理 0.00 ms</span>
+          </div>
+        </div>
+
+        <div class="ctrls">
+          <div class="ctl-row">
+            <span class="pre">初值预设</span>
+            <button class="btn sm" data-preset="hang">下垂 θ₀=π−0.14</button>
+            <button class="btn sm" data-preset="near">近直立 θ₀=0.15</button>
+            <button class="btn sm" data-preset="big">大角度 θ₀=2.4</button>
+            <button class="btn sm" data-preset="shift">偏置 p₀=1.2</button>
+          </div>
+          <div class="ctl-row">
+            <label class="sl">θ₀ <input type="range" id="sTh0" min="-180" max="180" step="1" value="172"><b id="vTh0">172°</b></label>
+            <label class="sl">p₀ <input type="range" id="sPos0" min="-2" max="2" step="0.05" value="0"><b id="vPos0">0.00</b></label>
+          </div>
+          <div class="ctl-row">
+            <label class="sl">侧向扰动 <input type="range" id="sDist" min="-8" max="8" step="0.5" value="0"><b id="vDist">0 N</b></label>
+            <label class="sl">测量噪声 <input type="range" id="sNoise" min="0" max="2" step="0.05" value="0"><b id="vNoise">0.00</b></label>
+            <button class="btn sm" id="btnKick">脉冲踢一下</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ right: readouts + attention ============ -->
+      <div class="lab-right">
+        <div class="ro-grid">
+          <div><span>t</span><b id="roT">0.00 s</b></div>
+          <div><span>θ</span><b id="roTh">0.0°</b></div>
+          <div><span>θ̇</span><b id="roW">0.0</b></div>
+          <div><span>p</span><b id="roP">0.00 m</b></div>
+          <div><span>u</span><b id="roU">0.0 N</b></div>
+          <div><span>E</span><b id="roE">−2.94 J</b></div>
+        </div>
+        <div class="att-box">
+          <div class="att-head">
+            <span>注意力：最后一个 token 在看哪里</span>
+            <span class="dim" id="attHint">选中 Transformer 时可见</span>
+          </div>
+          <canvas id="attMap" height="120"></canvas>
+          <div class="att-foot" id="attFoot">横轴 = 过去 24 步（左旧 → 右新），纵轴 = 层（上：第 1 层，下：第 2 层），色深 = 注意力权重</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ compare ============ -->
+    <div class="cmp" id="cmpWrap">
+      <div class="cmp-grid" id="cmpGrid">
+        <div class="cmp-cell" data-c="lqr">
+          <div class="cmp-title"><i style="--c:#57a8f5"></i>LQR</div>
+          <canvas class="cmp-cv" height="104"></canvas>
+          <div class="cmp-note">只有直立附近有效</div>
+        </div>
+        <div class="cmp-cell" data-c="elqr">
+          <div class="cmp-title"><i style="--c:#2fd3c0"></i>Energy+LQR</div>
+          <canvas class="cmp-cv" height="104"></canvas>
+          <div class="cmp-note">摆起 + 稳摆</div>
+        </div>
+        <div class="cmp-cell" data-c="esmc">
+          <div class="cmp-title"><i style="--c:#f2a93b"></i>Energy+SMC</div>
+          <canvas class="cmp-cv" height="104"></canvas>
+          <div class="cmp-note">同上 + 抗扰</div>
+        </div>
+        <div class="cmp-cell" data-c="tf">
+          <div class="cmp-title"><i style="--c:#e0619e"></i>Transformer</div>
+          <canvas class="cmp-cv" height="104"></canvas>
+          <div class="cmp-note">模仿专家</div>
+        </div>
+        <div class="cmp-cell" data-c="tfrl">
+          <div class="cmp-title"><i style="--c:#8ff0e2"></i>+ RL 微调</div>
+          <canvas class="cmp-cv" height="104"></canvas>
+          <div class="cmp-note">更快、更省力</div>
+        </div>
+      </div>
+      <div class="cmp-chart">
+        <div class="cmp-legend">
+          <span>|θ| 随时间（同一初值、同一扰动）</span>
+          <span class="dim">灰线 = 0.15 rad 判定门限</span>
+        </div>
+        <canvas id="cmpChart" height="240" style="width:100%;height:240px"></canvas>
+      </div>
+    </div>
+
+    <!-- ============ charts ============ -->
+    <div class="charts" id="chartsWrap">
+      <div class="chart-cell">
+        <div class="chart-t">倾角 θ(t)</div>
+        <canvas class="ch" id="chTheta" height="150"></canvas>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-t">车位置 p(t)</div>
+        <canvas class="ch" id="chPos" height="150"></canvas>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-t">控制力 u(t)</div>
+        <canvas class="ch" id="chU" height="150"></canvas>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-t">摆杆能量 E(t)（0 = 直立静止）</div>
+        <canvas class="ch" id="chE" height="150"></canvas>
+      </div>
+      <div class="chart-cell wide">
+        <div class="chart-t">相图 θ–θ̇：能量泵把轨道"推"到分界线上</div>
+        <canvas class="ch" id="phase" height="270"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="parity-line" id="labParity">正在与 Python 参考轨迹比对…</div>
+
+  <div class="note" style="margin-top:16px">
+    <b>几个建议的玩法</b>：
+    ① 选 <span class="pill bl">LQR</span>，初值用"下垂"，看它把小车推到导轨尽头也立不起来 —— 线性控制器的能力边界；
+    ② 切到<span class="pill cy">Energy+LQR</span>，观察能量 E 如何阶梯式爬到 0，以及"摆起→稳摆"模式切换的瞬间；
+    ③ 把"侧向扰动"拉到 ±4 N，对比 <span class="pill cy">Energy+LQR</span> 与 <span class="pill am">Energy+SMC</span>
+    的稳态角度偏差（0.014 vs 0.006 rad）；拉到 ±6~8 N 会看到两者都被推上导轨——因为没有积分项，
+    持续风力会造成位置稳态偏差，这是两种方法共同的短板；
+    ④ 对比 <span class="pill mg">Transformer</span> 与 <span class="pill" style="color:#8ff0e2;border-color:#1f6f68">+ RL 微调</span>：
+    同一个网络、同一份初始化，只是目标函数不同——RL 版摆起更快、力更平（见第 07 节）；<br>
+    ⑤ 选 <span class="pill mg">Transformer</span>，看注意力热图：实测它在<strong>两个阶段都几乎铺满整个 0.48 s 窗口</strong>
+    （第 2 层等效跨度 ≈18–20 步、中心在 10 步附近），第 1 层在稳摆时略微向近期收缩（中心 9.7 → 7.3 步）——
+    它依靠"一整段历史"判断摆动相位与阻尼状态，而不是靠最近几个采样点做微分。
+  </div>
+</section>
+
+<style>
+.lab{background:linear-gradient(180deg,#0d151d,#0a1017);border:1px solid var(--line);border-radius:16px;
+  padding:16px;margin:22px 0 8px}
+.lab-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.spacer{flex:1}
+.seg{display:flex;background:#0b131b;border:1px solid var(--line);border-radius:9px;padding:2px}
+.seg button{background:none;border:0;color:var(--tx3);font:inherit;font-size:13px;padding:6px 13px;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--panel2);color:#fff;box-shadow:0 0 0 1px var(--line2) inset}
+.btn{background:var(--panel2);border:1px solid var(--line2);color:var(--tx);font:inherit;font-size:13px;
+  padding:7px 13px;border-radius:8px;cursor:pointer;transition:.15s}
+.btn:hover{background:#1d2b3a;border-color:#36506a}
+.btn.primary{background:#0f3d3a;border-color:#1f6f68;color:#8ff0e2}
+.btn.primary:hover{background:#14514c}
+.btn.sm{padding:4px 9px;font-size:12px}
+.mini{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx3)}
+.mini input{width:96px}
+.lab-main{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+@media(max-width:980px){.lab-main{grid-template-columns:1fr}}
+.chips{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:10px}
+@media(max-width:980px){.chips{grid-template-columns:repeat(2,1fr)}}
+.chip{display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:#0b131b;border:1px solid var(--line);
+  border-radius:10px;padding:8px 10px;color:var(--tx2);font:inherit;font-size:12.5px;cursor:pointer;transition:.15s;position:relative}
+.chip i{position:absolute;right:9px;top:9px;width:7px;height:7px;border-radius:50%;background:var(--c);opacity:.35}
+.chip .sub{font-size:10.5px;color:var(--tx3);font-family:var(--mono)}
+.chip:hover{border-color:var(--line2)}
+.chip.on{background:#12202b;border-color:#36506a;color:#fff}
+.chip.on i{opacity:1;box-shadow:0 0 8px var(--c)}
+.scene-wrap{position:relative;background:radial-gradient(600px 220px at 50% 110%,#101c26,#0a1017);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#scene{display:block;width:100%;height:300px}
+.scene-hud{position:absolute;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.badge{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:20px;background:#0f2725;
+  border:1px solid #1f6f68;color:#8ff0e2}
+.badge.dim{background:#101a24;border-color:var(--line2);color:var(--tx3)}
+.ctrls{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.ctl-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.pre{font-size:11px;color:var(--tx3);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.sl{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx3);flex:1 1 190px}
+.sl input{flex:1;min-width:70px}
+.sl b{font-family:var(--mono);color:var(--tx);font-weight:500;min-width:52px;text-align:right;font-size:11.5px}
+input[type=range]{-webkit-appearance:none;height:3px;background:#22303e;border-radius:3px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--cy);cursor:pointer;box-shadow:0 0 6px rgba(47,211,192,.5)}
+.lab-right{display:flex;flex-direction:column;gap:10px}
+.ro-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.ro-grid>div{background:#0b131b;border:1px solid var(--line);border-radius:9px;padding:7px 9px}
+.ro-grid span{display:block;font-size:10px;color:var(--tx3);font-family:var(--mono);letter-spacing:.08em}
+.ro-grid b{font-family:var(--mono);font-size:14.5px;color:#fff;font-weight:500}
+.att-box{flex:1;background:#0b131b;border:1px solid var(--line);border-radius:10px;padding:9px 10px;min-height:170px}
+.att-head{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--tx2);margin-bottom:6px}
+#attMap{display:block;width:100%;height:120px}
+.att-foot{font-size:10.5px;color:var(--tx3);margin-top:5px;line-height:1.5}
+.cmp{display:none;margin-top:16px}
+.cmp.on{display:block}
+.cmp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+@media(max-width:980px){.cmp-grid{grid-template-columns:repeat(2,1fr)}}
+.cmp-cell{background:#0b131b;border:1px solid var(--line);border-radius:10px;padding:6px 8px 4px}
+.cmp-title{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--tx2);font-family:var(--mono)}
+.cmp-title i{width:7px;height:7px;border-radius:50%;background:var(--c);display:inline-block}
+.cmp-cv{display:block;width:100%;height:104px}
+.cmp-note{font-size:10px;color:var(--tx3);padding-bottom:3px}
+.cmp-chart{margin-top:10px;background:#0b131b;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.cmp-legend{display:flex;justify-content:space-between;font-size:11.5px;color:var(--tx2);margin-bottom:4px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+@media(max-width:980px){.charts{grid-template-columns:1fr}}
+.chart-cell{background:#0b131b;border:1px solid var(--line);border-radius:10px;padding:7px 9px}
+.chart-cell.wide{grid-column:span 2}
+@media(max-width:980px){.chart-cell.wide{grid-column:span 1}}
+.chart-t{font-size:11.5px;color:var(--tx2);margin-bottom:3px}
+.ch{display:block;width:100%;height:150px}
+#phase{height:270px}
+.parity-line{margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--tx3);
+  background:#0b131b;border:1px solid var(--line);border-radius:8px;padding:8px 11px}
+</style>

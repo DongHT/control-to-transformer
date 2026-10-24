@@ -1,0 +1,716 @@
+<script>
+/* =====================================================================
+   5. CANVAS HELPERS
+   ===================================================================== */
+function fit(cv) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = cv.clientWidth || cv.parentElement.clientWidth, h = cv.clientHeight || +cv.getAttribute('height') || 150;
+  if (cv._w !== w || cv._h !== h || cv._dpr !== dpr) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv._w = w; cv._h = h; cv._dpr = dpr;
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  return cv.getContext('2d');
+}
+const COL = { cy: '#2fd3c0', am: '#f2a93b', mg: '#e0619e', bl: '#57a8f5', gr: '#7bd66b', tx: '#93a5b8', tx3: '#63788d', line: '#1f2d3c' };
+
+/* ---------------------------------------------------- cart-pole scene */
+function drawScene(cv, sim, opt) {
+  opt = opt || {};
+  const g = fit(cv), W = cv._w, H = cv._h;
+  g.clearRect(0, 0, W, H);
+  const xmax = PL.x_max;
+  const pad = 26;
+  const sc = (W - 2 * pad) / (2 * xmax);           // px per meter
+  const cx = W / 2;
+  const groundY = H * 0.80;
+  const X = p => cx + p * sc;
+
+  /* rail */
+  const grd = g.createLinearGradient(0, groundY, 0, groundY + 12);
+  grd.addColorStop(0, '#22303e'); grd.addColorStop(1, '#111a24');
+  g.fillStyle = grd; g.fillRect(pad - 8, groundY + 2, W - 2 * pad + 16, 7);
+  g.strokeStyle = '#26455c'; g.lineWidth = 1;
+  g.strokeRect(pad - 8, groundY + 2, W - 2 * pad + 16, 7);
+
+  /* limits + centre */
+  g.setLineDash([4, 4]); g.strokeStyle = '#3a2233'; g.lineWidth = 1;
+  [ -xmax, xmax ].forEach(v => { g.beginPath(); g.moveTo(X(v), groundY - H * 0.42); g.lineTo(X(v), groundY + 2); g.stroke(); });
+  g.strokeStyle = '#2a3b4d';
+  g.beginPath(); g.moveTo(cx, groundY - H * 0.42); g.lineTo(cx, groundY + 2); g.stroke();
+  g.setLineDash([]);
+
+  const x = sim.x, p = x[0], th = x[1];
+  const cartW = 0.30 * sc, cartH = 26;
+
+  /* pole tip trail */
+  if (sim.trail) {
+    g.lineWidth = 1.4;
+    for (let i = 1; i < sim.trail.length; i++) {
+      const a = sim.trail[i - 1], b = sim.trail[i];
+      g.strokeStyle = 'rgba(47,211,192,' + (0.03 + 0.20 * i / sim.trail.length) + ')';
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    }
+  }
+
+  /* cart */
+  const cartX = X(p) - cartW / 2, cartY = groundY - cartH + 4;
+  g.fillStyle = '#1d2c3b'; g.strokeStyle = '#3d5c78'; g.lineWidth = 1.5;
+  const r = 6;
+  g.beginPath();
+  g.moveTo(cartX + r, cartY); g.lineTo(cartX + cartW - r, cartY);
+  g.quadraticCurveTo(cartX + cartW, cartY, cartX + cartW, cartY + r);
+  g.lineTo(cartX + cartW, cartY + cartH - r);
+  g.quadraticCurveTo(cartX + cartW, cartY + cartH, cartX + cartW - r, cartY + cartH);
+  g.lineTo(cartX + r, cartY + cartH);
+  g.quadraticCurveTo(cartX, cartY + cartH, cartX, cartY + cartH - r);
+  g.lineTo(cartX, cartY + r);
+  g.quadraticCurveTo(cartX, cartY, cartX + r, cartY);
+  g.fill(); g.stroke();
+  const wheelY = cartY + cartH;
+  [-cartW * 0.3, cartW * 0.3].forEach(dx => {
+    g.beginPath(); g.arc(X(p) + dx, wheelY, 5.5, 0, 7);
+    g.fillStyle = '#0b131b'; g.fill(); g.strokeStyle = '#57a8f5'; g.lineWidth = 1.3; g.stroke();
+  });
+
+  /* pole */
+  const px = X(p), py = cartY + 2;
+  const Lp = PL.l * 1.15 * sc;                     // visual length
+  const tx = px + Math.sin(th) * Lp, ty = py - Math.cos(th) * Lp;
+  g.strokeStyle = opt.dim ? '#2b6b66' : '#2fd3c0';
+  g.lineWidth = 5; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(px, py); g.lineTo(tx, ty); g.stroke();
+  g.beginPath(); g.arc(tx, ty, 9, 0, 7);
+  g.fillStyle = opt.dim ? '#12312e' : '#0f2725'; g.fill();
+  g.strokeStyle = opt.dim ? '#2b6b66' : '#2fd3c0'; g.lineWidth = 2; g.stroke();
+  g.beginPath(); g.arc(tx, ty, 3, 0, 7); g.fillStyle = opt.dim ? '#2b6b66' : '#2fd3c0'; g.fill();
+  /* pivot */
+  g.beginPath(); g.arc(px, py, 3.2, 0, 7); g.fillStyle = '#dae4ee'; g.fill();
+
+  if (sim.trail) { sim.trail.push([tx, ty]); if (sim.trail.length > 90) sim.trail.shift(); }
+
+  /* force arrow */
+  const u = sim.u;
+  if (Math.abs(u) > 0.2) {
+    const len = Math.min(1, Math.abs(u) / PL.u_max) * sc * 0.9 * Math.sign(u);
+    const ay = cartY + cartH / 2;
+    g.strokeStyle = '#f2a93b'; g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(px, ay); g.lineTo(px + len, ay); g.stroke();
+    const s = Math.sign(u);
+    g.beginPath();
+    g.moveTo(px + len, ay); g.lineTo(px + len - 7 * s, ay - 4); g.lineTo(px + len - 7 * s, ay + 4);
+    g.closePath(); g.fillStyle = '#f2a93b'; g.fill();
+  }
+  /* disturbance arrow */
+  const d = opt.dist || 0;
+  if (Math.abs(d) > 0.05) {
+    const len = Math.min(1, Math.abs(d) / 8) * sc * 0.7 * Math.sign(d);
+    const ay = cartY - 16;
+    g.strokeStyle = '#e0619e'; g.lineWidth = 2;
+    g.setLineDash([4, 3]);
+    g.beginPath(); g.moveTo(px, ay); g.lineTo(px + len, ay); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = '#e0619e'; g.font = '10px ui-monospace';
+    g.fillText(d.toFixed(1) + ' N', px + len + (d > 0 ? 3 : -26), ay + 3);
+  }
+  /* readout on canvas */
+  g.fillStyle = '#63788d'; g.font = '11px ui-monospace';
+  g.fillText('t = ' + sim.t.toFixed(2) + ' s', 10, H - 8);
+  g.textAlign = 'right';
+  g.fillText('θ = ' + (wrapA(th) * 180 / Math.PI).toFixed(1) + '°   u = ' + u.toFixed(2) + ' N', W - 10, H - 8);
+  g.textAlign = 'left';
+}
+
+/* ---------------------------------------------------- time series */
+function drawChart(cv, spec) {
+  const g = fit(cv), W = cv._w, H = cv._h;
+  g.clearRect(0, 0, W, H);
+  const P = { l: 38, r: 8, t: 8, b: 16 };
+  const w = W - P.l - P.r, h = H - P.t - P.b;
+  const t1 = Math.max(spec.tWin, spec.tNow), t0 = t1 - spec.tWin;
+  const y0 = spec.yMin, y1 = spec.yMax;
+  const sx = t => P.l + (t - t0) / (t1 - t0) * w;
+  const sy = v => P.t + (1 - (clamp(v, y0, y1) - y0) / (y1 - y0)) * h;
+
+  /* grid */
+  g.strokeStyle = '#16212d'; g.lineWidth = 1; g.fillStyle = '#4b5f73'; g.font = '9px ui-monospace';
+  const ny = spec.yTicks || 4;
+  for (let i = 0; i <= ny; i++) {
+    const v = y0 + (y1 - y0) * i / ny, y = sy(v);
+    g.beginPath(); g.moveTo(P.l, y); g.lineTo(P.l + w, y); g.stroke();
+    g.fillText((spec.fmtY ? spec.fmtY(v) : v.toFixed(1)), 3, y + 3);
+  }
+  const nx = 4;
+  for (let i = 0; i <= nx; i++) {
+    const tv = t0 + (t1 - t0) * i / nx, xx = sx(tv);
+    g.beginPath(); g.moveTo(xx, P.t); g.lineTo(xx, P.t + h); g.stroke();
+    if (i) g.fillText(tv.toFixed(1) + 's', xx - 10, H - 4);
+  }
+  /* threshold */
+  if (spec.thr !== undefined) {
+    g.strokeStyle = 'rgba(147,165,184,.5)'; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(P.l, sy(spec.thr)); g.lineTo(P.l + w, sy(spec.thr)); g.stroke();
+    g.setLineDash([]);
+  }
+  /* series */
+  spec.series.forEach(s => {
+    const d = s.data, t = spec.ts;
+    if (!d.length) return;
+    g.strokeStyle = s.color; g.lineWidth = s.w || 1.6;
+    if (s.dash) g.setLineDash(s.dash);
+    g.beginPath();
+    let started = false;
+    for (let i = 0; i < d.length; i++) {
+      const tv = t[i];
+      if (tv < t0) continue;
+      const xx = sx(tv), yy = sy(d[i]);
+      if (!started) { g.moveTo(xx, yy); started = true; } else g.lineTo(xx, yy);
+    }
+    g.stroke(); g.setLineDash([]);
+    /* current value dot */
+    if (d.length) {
+      const xx = sx(spec.ts[d.length - 1]), yy = sy(d[d.length - 1]);
+      g.beginPath(); g.arc(xx, yy, 2.4, 0, 7); g.fillStyle = s.color; g.fill();
+    }
+  });
+}
+
+/* ---------------------------------------------------- phase portrait */
+function drawPhase(cv, sim) {
+  const g = fit(cv), W = cv._w, H = cv._h;
+  g.clearRect(0, 0, W, H);
+  const P = { l: 40, r: 12, t: 10, b: 22 };
+  const w = W - P.l - P.r, h = H - P.t - P.b;
+  const x0 = -Math.PI, x1 = Math.PI, y0 = -9, y1 = 9;
+  const sx = v => P.l + (v - x0) / (x1 - x0) * w;
+  const sy = v => P.t + (1 - (v - y0) / (y1 - y0)) * h;
+
+  g.strokeStyle = '#16212d';
+  g.fillStyle = '#4b5f73'; g.font = '9px ui-monospace';
+  for (let i = 0; i <= 4; i++) {
+    const v = y0 + (y1 - y0) * i / 4, y = sy(v);
+    g.beginPath(); g.moveTo(P.l, y); g.lineTo(P.l + w, y); g.stroke();
+    g.fillText(v.toFixed(1), 6, y + 3);
+  }
+  [-Math.PI, -Math.PI / 2, 0, Math.PI / 2, Math.PI].forEach(v => {
+    const xx = sx(v);
+    g.strokeStyle = v === 0 ? '#2a3b4d' : '#16212d';
+    g.beginPath(); g.moveTo(xx, P.t); g.lineTo(xx, P.t + h); g.stroke();
+    g.fillStyle = '#4b5f73'; g.textAlign = 'center';
+    g.fillText(v === 0 ? '0' : (v > 0 ? '+' : '−') + 'π' + (Math.abs(v) === Math.PI ? '' : '/2'), xx, H - 8);
+    g.textAlign = 'left';
+  });
+  /* separatrix E=0 :  theta_dot = +- sqrt(2g/l (1-cos th)) */
+  g.strokeStyle = 'rgba(242,169,59,.45)'; g.setLineDash([4, 4]); g.lineWidth = 1.2;
+  [1, -1].forEach(sgn => {
+    g.beginPath();
+    for (let i = 0; i <= 200; i++) {
+      const th = -Math.PI + 2 * Math.PI * i / 200;
+      const wv = sgn * Math.sqrt(Math.max(0, 2 * PL.g / PL.l * (1 - Math.cos(th))));
+      const xx = sx(th), yy = sy(wv);
+      i ? g.lineTo(xx, yy) : g.moveTo(xx, yy);
+    }
+    g.stroke();
+  });
+  g.setLineDash([]);
+  /* trail */
+  const ts = sim.hist.t, tmax = ts[ts.length - 1];
+  g.lineWidth = 2;
+  for (let i = 1; i < ts.length; i++) {
+    const age = (tmax - ts[i]) / 6;              // 6 s fade
+    if (age > 1) continue;
+    g.strokeStyle = 'rgba(47,211,192,' + (0.06 + 0.9 * (1 - age)) + ')';
+    g.beginPath();
+    g.moveTo(sx(sim.hist.th[i - 1]), sy(clamp(sim.hist.w ? sim.hist.w[i - 1] : 0, y0, y1)));
+    g.lineTo(sx(sim.hist.th[i]), sy(clamp(sim.hist.w ? sim.hist.w[i] : 0, y0, y1)));
+    g.stroke();
+  }
+  /* current point */
+  const cx = sx(wrapA(sim.x[1])), cy = sy(clamp(sim.x[3], y0, y1));
+  g.beginPath(); g.arc(cx, cy, 4.5, 0, 7);
+  g.fillStyle = '#fff'; g.fill();
+  g.strokeStyle = '#2fd3c0'; g.lineWidth = 2; g.stroke();
+}
+
+/* ---------------------------------------------------- attention map */
+function drawAttn(cv, attn) {
+  const g = fit(cv), W = cv._w, H = cv._h;
+  g.clearRect(0, 0, W, H);
+  if (!attn) {
+    g.fillStyle = '#3d5164'; g.font = '11px ui-monospace';
+    g.fillText('（选择 Transformer 控制器后显示）', 8, H / 2);
+    return;
+  }
+  const T = attn[0].length, rows = attn.length;
+  const padL = 34, padT = 6, gap = 8;
+  const cw = (W - padL - 8) / T, rh = (H - padT * 2 - gap * (rows - 1)) / rows;
+  g.font = '9px ui-monospace';
+  for (let L = 0; L < rows; L++) {
+    let mx = 0;
+    for (let i = 0; i < T; i++) mx = Math.max(mx, attn[L][i]);
+    for (let i = 0; i < T; i++) {
+      const a = attn[L][i] / (mx || 1);
+      const xx = padL + i * cw, yy = padT + L * (rh + gap);
+      g.fillStyle = 'rgba(47,211,192,' + (0.06 + 0.94 * a) + ')';
+      g.fillRect(xx + 0.5, yy, cw - 1.5, rh);
+    }
+    g.fillStyle = '#63788d';
+    g.fillText('L' + (L + 1), 4, padT + L * (rh + gap) + rh / 2 + 3);
+  }
+  /* centroid marker */
+  for (let L = 0; L < rows; L++) {
+    let m = 0, s = 0;
+    for (let i = 0; i < T; i++) { m += attn[L][i]; s += attn[L][i] * (T - 1 - i); }
+    const c = m > 0 ? s / m : 0;
+    const xx = padL + c * cw + cw / 2, yy = padT + L * (rh + gap);
+    g.strokeStyle = '#f2a93b'; g.lineWidth = 1.4;
+    g.beginPath(); g.moveTo(xx, yy - 2); g.lineTo(xx, yy + rh + 2); g.stroke();
+  }
+  g.fillStyle = '#4b5f73'; g.textAlign = 'right';
+  g.fillText('现在', W - 8, H - 1);
+  g.textAlign = 'left';
+  g.fillText('−24 步', padL + 1, H - 1);
+  return { span: 0 };
+}
+
+/* ---------------------------------------------------- loss chart */
+function drawLoss(cv) {
+  const g = fit(cv), W = cv._w, H = cv._h;
+  g.clearRect(0, 0, W, H);
+  const P = { l: 52, r: 12, t: 14, b: 26 };
+  const w = W - P.l - P.r, h = H - P.t - P.b;
+  const n = TRAINLOG.length;
+  const lo = 1e-3, hi = 3e-2;
+  const sx = i => P.l + (i / (n - 1)) * w;
+  const sy = v => P.t + (1 - (Math.log10(clamp(v, lo, hi)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * h;
+  /* phase shading */
+  g.fillStyle = 'rgba(242,169,59,.07)'; g.fillRect(P.l, P.t, w * 24 / n, h);
+  g.fillStyle = 'rgba(47,211,192,.06)'; g.fillRect(P.l + w * 24 / n, P.t, w * (n - 24) / n, h);
+  /* grid */
+  g.font = '9px ui-monospace'; g.fillStyle = '#4b5f73'; g.strokeStyle = '#16212d';
+  [1e-3, 3e-3, 1e-2, 3e-2].forEach(v => {
+    const y = sy(v);
+    g.beginPath(); g.moveTo(P.l, y); g.lineTo(P.l + w, y); g.stroke();
+    g.fillText(v.toExponential(0), 6, y + 3);
+  });
+  [1, 12, 24, 34, n].forEach(i => {
+    if (i < 1 || i > n) return;
+    const xx = sx(i - 1);
+    g.beginPath(); g.moveTo(xx, P.t); g.lineTo(xx, P.t + h); g.stroke();
+    g.fillText('e' + i, xx - 8, H - 8);
+  });
+  /* curve */
+  g.strokeStyle = '#2fd3c0'; g.lineWidth = 1.8; g.beginPath();
+  TRAINLOG.forEach((d, i) => { const xx = sx(i), yy = sy(d.val); i ? g.lineTo(xx, yy) : g.moveTo(xx, yy); });
+  g.stroke();
+  /* markers */
+  const mk = (i, txt, col) => {
+    const xx = sx(i), yy = sy(TRAINLOG[i].val);
+    g.beginPath(); g.arc(xx, yy, 3, 0, 7); g.fillStyle = col; g.fill();
+    g.fillStyle = col; g.font = '9.5px ui-monospace';
+    g.fillText(txt, Math.min(xx + 6, W - 120), yy - 6);
+  };
+  mk(23, 'BC 结束 · val 1.45e-3 · 闭环 0%', '#f2a93b');
+  mk(n - 1, 'DAgger 结束 · val 3.4e-3 · 闭环 100%', '#2fd3c0');
+}
+
+/* ---------------------------------------------------- RL training curve */
+function drawRL(cv) {
+  const g = fit(cv), W_ = cv._w, H_ = cv._h;
+  g.clearRect(0, 0, W_, H_);
+  const P = { l: 42, r: 44, t: 14, b: 26 };
+  const w = W_ - P.l - P.r, h = H_ - P.t - P.b;
+  const runs = [['policy_rl', 0], ['policy_rl_dr', 1]];
+  const a = RL_LOGS['policy_rl'].history, b = RL_LOGS['policy_rl_dr'].history;
+  const n = a.length + b.length;
+  const sx = i => P.l + (i / Math.max(1, n - 1)) * w;
+  const yl = v => P.t + (1 - (v - 1.6) / (3.0 - 1.6)) * h;        // t_up axis
+  const yr = v => P.t + (1 - (v - 1.7) / (2.7 - 1.7)) * h;        // force axis
+  g.font = '9px ui-monospace'; g.strokeStyle = '#16212d';
+  for (let i = 0; i <= 4; i++) {
+    const v = 1.6 + 1.4 * i / 4, y = yl(v);
+    g.beginPath(); g.moveTo(P.l, y); g.lineTo(P.l + w, y); g.stroke();
+    g.fillStyle = '#4b5f73'; g.fillText(v.toFixed(1), 6, y + 3);
+    const v2 = 1.7 + 1.0 * i / 4;
+    g.fillStyle = 'rgba(242,169,59,.65)';
+    g.fillText(v2.toFixed(1), W_ - P.r + 8, yr(v2) + 3);
+  }
+  g.fillStyle = '#63788d';
+  g.fillText('t_up [s]', 4, P.t - 3);
+  g.fillStyle = 'rgba(242,169,59,.8)'; g.textAlign = 'right';
+  g.fillText('力 RMS [N]', W_ - 4, P.t - 3); g.textAlign = 'left';
+  /* BC init reference lines */
+  g.setLineDash([4, 4]);
+  g.strokeStyle = 'rgba(47,211,192,.35)'; g.beginPath();
+  g.moveTo(P.l, yl(2.74)); g.lineTo(P.l + w, yl(2.74)); g.stroke();
+  g.strokeStyle = 'rgba(242,169,59,.35)'; g.beginPath();
+  g.moveTo(P.l, yr(2.39)); g.lineTo(P.l + w, yr(2.39)); g.stroke();
+  g.setLineDash([]);
+  /* curves */
+  const plot = (hist, off, col, key, yf) => {
+    g.strokeStyle = col; g.lineWidth = 1.7; g.beginPath();
+    hist.forEach((d, i) => {
+      const x = sx(off + i), y = yf(d.eval[key]);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+  };
+  plot(a, 0, '#2fd3c0', 't_up', yl);
+  plot(b, a.length, '#2fd3c0', 't_up', yl);
+  g.globalAlpha = 0.85;
+  plot(a, 0, '#f2a93b', 'u_rms', yr);
+  plot(b, a.length, '#f2a93b', 'u_rms', yr);
+  g.globalAlpha = 1;
+  /* phase boundary */
+  [0, a.length].forEach((i, k) => {
+    const x = sx(i);
+    g.strokeStyle = k ? 'rgba(224,97,158,.6)' : 'rgba(224,97,158,.35)';
+    g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(x, P.t); g.lineTo(x, P.t + h); g.stroke();
+    g.setLineDash([]);
+  });
+  g.fillStyle = '#e0619e'; g.font = '9.5px ui-monospace';
+  g.fillText('BC 初始化', sx(0) + 4, P.t + 10);
+  g.fillText('RL+DR 阶段', sx(a.length) + 4, P.t + 10);
+  g.strokeStyle = '#1f2d3c'; g.strokeRect(P.l, P.t, w, h);
+}
+
+/* ---------------------------------------------------- architecture diagram bits */
+(function drawDiagram() {
+  const tokrow = document.getElementById('tokrow');
+  if (!tokrow) return;
+  const N = PH, cw = 8.2, gap = 1.6;
+  let svg = '';
+  for (let i = 0; i < N; i++) {
+    const last = i === N - 1;
+    svg += '<rect x="' + (i * (cw + gap)) + '" y="0" width="' + cw + '" height="14" rx="2" fill="'
+        + (last ? '#2fd3c0' : '#132330') + '" stroke="' + (last ? '#2fd3c0' : '#25384a') + '"/>';
+  }
+  svg += '<text x="0" y="30" font-size="9.5" fill="#4b5f73" font-family="ui-monospace">过去 (t−24)</text>';
+  svg += '<text x="' + (N * (cw + gap) - 26) + '" y="30" font-size="9.5" fill="#2fd3c0" font-family="ui-monospace">现在</text>';
+  tokrow.innerHTML = svg;
+  /* mini causal mask */
+  const cell = 4.0, mg = document.getElementById('maskgrid');
+  let s2 = '';
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      s2 += '<rect x="' + (c * cell) + '" y="' + (r * cell) + '" width="' + (cell - 0.7) + '" height="'
+          + (cell - 0.7) + '" fill="' + (c <= r ? (c === r ? '#2fd3c0' : '#1d4b47') : '#101a24') + '"/>';
+  mg.innerHTML = s2;
+})();
+
+/* =====================================================================
+   6. APP STATE + UI
+   ===================================================================== */
+const KINDS = ['lqr', 'elqr', 'esmc', 'tf', 'tfrl'];
+const LABEL = { lqr: 'LQR', elqr: 'Energy+LQR', esmc: 'Energy+SMC', tf: 'Transformer',
+                tfrl: 'Transformer+RL' };
+const KCOL = { lqr: COL.bl, elqr: COL.cy, esmc: COL.am, tf: COL.mg, tfrl: '#8ff0e2' };
+
+const app = {
+  mode: 'single', ctrl: 'elqr', running: false, speed: 1,
+  th0: Math.PI - 0.14, p0: 0, dist: 0, noise: 0,
+  kickUntil: -1, kickMag: 9, sim: null, sims: {},
+  inferMs: 0
+};
+
+function newSim(kind) {
+  const s = new Sim(kind, [app.p0, app.th0, 0, 0], { seed: 987 + KINDS.indexOf(kind) * 7 });
+  s.trail = [];
+  return s;
+}
+function resetAll() {
+  app.sim = newSim(app.ctrl);
+  app.kickUntil = -1;
+  KINDS.forEach(k => { app.sims[k] = newSim(k); app.sims[k].trail = []; });
+}
+
+const $ = id => document.getElementById(id);
+
+/* ---------------- controls ---------------- */
+$('modeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  [...$('modeSeg').children].forEach(c => c.classList.toggle('on', c === b));
+  app.mode = b.dataset.mode;
+  $('cmpWrap').classList.toggle('on', app.mode === 'compare');
+  $('chartsWrap').style.display = app.mode === 'compare' ? 'none' : '';
+  resetAll();
+});
+$('ctrlChips').addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  [...$('ctrlChips').children].forEach(c => c.classList.toggle('on', c === b));
+  app.ctrl = b.dataset.c;
+  if (app.mode === 'single') app.sim = newSim(app.ctrl);
+});
+$('btnPlay').addEventListener('click', () => {
+  app.running = !app.running;
+  $('btnPlay').textContent = app.running ? '⏸ 暂停' : '▶ 运行';
+  $('btnPlay').classList.toggle('primary', !app.running);
+});
+$('btnStep').addEventListener('click', () => { for (let i = 0; i < 5; i++) advance(0.1); });
+$('btnReset').addEventListener('click', resetAll);
+$('speed').addEventListener('input', e => { app.speed = +e.target.value; $('speedV').textContent = app.speed.toFixed(2) + '×'; });
+$('sTh0').addEventListener('input', e => {
+  app.th0 = +e.target.value * Math.PI / 180;
+  $('vTh0').textContent = e.target.value + '°'; resetAll();
+});
+$('sPos0').addEventListener('input', e => {
+  app.p0 = +e.target.value; $('vPos0').textContent = app.p0.toFixed(2); resetAll();
+});
+$('sDist').addEventListener('input', e => {
+  app.dist = +e.target.value; $('vDist').textContent = app.dist.toFixed(1) + ' N';
+});
+$('sNoise').addEventListener('input', e => {
+  app.noise = +e.target.value; $('vNoise').textContent = app.noise.toFixed(2);
+});
+$('btnKick').addEventListener('click', () => {
+  app.kickUntil = (app.mode === 'single' ? app.sim.t : app.sims.elqr.t) + 0.2;
+});
+document.querySelectorAll('[data-preset]').forEach(b => {
+  b.addEventListener('click', () => {
+    const p = b.dataset.preset;
+    if (p === 'hang') { app.th0 = Math.PI - 0.14; app.p0 = 0; }
+    if (p === 'near') { app.th0 = 0.15; app.p0 = 0; }
+    if (p === 'big')  { app.th0 = 2.4; app.p0 = 0; }
+    if (p === 'shift'){ app.th0 = Math.PI - 0.3; app.p0 = 1.2; }
+    $('sTh0').value = Math.round(app.th0 * 180 / Math.PI);
+    $('vTh0').textContent = $('sTh0').value + '°';
+    $('sPos0').value = app.p0; $('vPos0').textContent = app.p0.toFixed(2);
+    resetAll();
+  });
+});
+
+/* ---------------- stepping ---------------- */
+function distAt(t) {
+  return (app.dist || 0) + (t < app.kickUntil ? app.kickMag : 0);
+}
+function advance(seconds) {
+  const n = Math.max(1, Math.round(seconds / DT));
+  for (let i = 0; i < n; i++) {
+    if (app.mode === 'single') {
+      const s = app.sim;
+      const t0 = performance.now();
+      s.step(app.noise, distAt(s.t));
+      if (s.kind === 'tf' || s.kind === 'tfrl') app.inferMs = 0.8 * app.inferMs + 0.2 * (performance.now() - t0);
+    } else {
+      KINDS.forEach(k => {
+        const s = app.sims[k];
+        s.step(app.noise, distAt(s.t));
+      });
+    }
+  }
+}
+
+/* ---------------- render ---------------- */
+function render() {
+  if (app.mode === 'single') {
+    const s = app.sim;
+    drawScene($('scene'), s, { dist: distAt(s.t) });
+    const th = wrapA(s.x[1]);
+    $('roT').textContent = s.t.toFixed(2) + ' s';
+    $('roTh').textContent = (th * 180 / Math.PI).toFixed(1) + '°';
+    $('roW').textContent = s.x[3].toFixed(2);
+    $('roP').textContent = s.x[0].toFixed(2) + ' m';
+    $('roU').textContent = s.u.toFixed(2) + ' N';
+    $('roE').textContent = energy(s.x).toFixed(2) + ' J';
+    let modeTxt = s.ctrl.mode === 'local' ? '稳摆' : (s.ctrl.mode === 'swing' ? '摆起' : LABEL[s.kind]);
+    if (s.kind === 'tf') modeTxt = '策略推理（模仿）';
+    if (s.kind === 'tfrl') modeTxt = '策略推理（RL）';
+    const mb = $('roMode');
+    mb.textContent = modeTxt + (s.ctrl.switches !== undefined && s.kind !== 'tf' ? ' · 切换 ' + s.ctrl.switches + ' 次' : '');
+    mb.style.color = s.ctrl.mode === 'local' ? '#2fd3c0' : '#f2a93b';
+    $('roRail').textContent = s.railHit ? '⚠ 已触及导轨极限' : '导轨安全';
+    $('roRail').style.color = s.railHit ? '#e0619e' : '';
+    $('roCost').textContent = (s.kind === 'tf' || s.kind === 'tfrl')
+      ? '策略推理 ' + app.inferMs.toFixed(2) + ' ms'
+      : '控制律 ≈ 0.01 ms';
+
+    const ts = s.hist.t;
+    drawChart($('chTheta'), {
+      ts, tNow: s.t, tWin: 12, yMin: -Math.PI, yMax: Math.PI, yTicks: 4,
+      fmtY: v => (v / Math.PI).toFixed(1) + 'π',
+      thr: 0.15,
+      series: [{ data: s.hist.th, color: COL.cy }]
+    });
+    drawChart($('chPos'), {
+      ts, tNow: s.t, tWin: 12, yMin: -PL.x_max, yMax: PL.x_max, yTicks: 4,
+      fmtY: v => v.toFixed(1).replace('-', '−'),
+      series: [{ data: s.hist.p, color: COL.bl }]
+    });
+    drawChart($('chU'), {
+      ts, tNow: s.t, tWin: 12, yMin: -PL.u_max, yMax: PL.u_max, yTicks: 4,
+      fmtY: v => v.toFixed(0),
+      thr: 0,
+      series: [{ data: s.hist.u, color: COL.am }]
+    });
+    drawChart($('chE'), {
+      ts, tNow: s.t, tWin: 12, yMin: -3.2, yMax: 0.6, yTicks: 4,
+      fmtY: v => v.toFixed(1),
+      thr: 0,
+      series: [{ data: s.hist.E, color: COL.gr }]
+    });
+    drawPhase($('phase'), s);
+    drawAttn($('attMap'), (s.kind === 'tf' || s.kind === 'tfrl') ? s.ctrl.lastAttn : null);
+  } else {
+    const cells = document.querySelectorAll('.cmp-cell');
+    cells.forEach(cell => {
+      const k = cell.dataset.c, s = app.sims[k];
+      drawScene(cell.querySelector('canvas'), s, { dist: distAt(s.t) });
+    });
+    const tRef = app.sims.elqr.hist.t;
+    drawChart($('cmpChart'), {
+      ts: tRef, tNow: tRef[tRef.length - 1], tWin: 12, yMin: 0, yMax: Math.PI, yTicks: 4,
+      fmtY: v => (v / Math.PI).toFixed(1) + 'π', thr: 0.15,
+      series: KINDS.map(k => ({
+        data: app.sims[k].hist.th.map(v => Math.abs(v)), color: KCOL[k]
+      }))
+    });
+  }
+}
+
+/* =====================================================================
+   7. MAIN LOOP
+   ===================================================================== */
+let lastT = performance.now(), acc = 0, frame = 0;
+function loop(now) {
+  const dtr = Math.min(0.06, (now - lastT) / 1000); lastT = now;
+  if (app.running) {
+    acc += dtr * app.speed;
+    let steps = Math.floor(acc / DT);
+    if (steps > 40) { steps = 40; acc = 0; } else acc -= steps * DT;
+    for (let i = 0; i < steps; i++) advance(DT);
+  }
+  if (++frame % 2 === 0) render(); else if (app.running) render();
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   8. SELF CHECKS
+   ===================================================================== */
+(function portCheck() {
+  const flat = (win) => {
+    const f = new Float32Array(PH * PF);
+    for (let t = 0; t < PH; t++) for (let j = 0; j < PF; j++) f[t * PF + j] = win[t][j];
+    return f;
+  };
+  let mxBC = 0, mxDR = 0;
+  PROBES.inputs.forEach((win, i) => {
+    mxBC = Math.max(mxBC, Math.abs(policyForward(flat(win), false, 'bc').u - PROBES.expect[i]));
+  });
+  PROBES2.inputs.forEach((win, i) => {
+    mxDR = Math.max(mxDR, Math.abs(policyForward(flat(win), false, 'rl').u - PROBES2.expect_dr[i]));
+    mxBC = Math.max(mxBC, Math.abs(policyForward(flat(win), false, 'bc').u - PROBES2.expect_bc[i]));
+  });
+  W = WSET.bc;
+  const el = document.getElementById('portCheck');
+  if (!el) return;
+  const ok = mxBC < 5e-3 && mxDR < 5e-3;
+  el.innerHTML = (ok ? '<span style="color:#7bd66b">✓ 通过</span>' : '<span style="color:#e0619e">✗ 偏差过大</span>')
+    + ' JS 前向 vs PyTorch(int8)：模仿策略 <b style="color:#fff">' + mxBC.toExponential(2)
+    + '</b> N，RL 策略 <b style="color:#fff">' + mxDR.toExponential(2)
+    + '</b> N（共 ' + (PROBES.inputs.length + PROBES2.inputs.length) + ' 组真实窗口，u<sub>max</sub>=12 N）';
+})();
+
+/* plant + classical controller parity against the Python reference trace */
+(function refCheck() {
+  const el = document.getElementById('labParity');
+  if (!el || typeof REFTRACE === 'undefined') return;
+  const sim = new Sim('elqr', REFTRACE.x0, { seed: 1 });
+  let maxd = 0, maxth = 0, k = 0;
+  for (let i = 1; i < REFTRACE.th.length; i++) {
+    while (k < REFTRACE.stride * i) { sim.step(0, 0); k++; }
+    const dth = Math.abs(wrapA(sim.x[1] - REFTRACE.th[i]));
+    maxth = Math.max(maxth, dth);
+    maxd = Math.max(maxd, dth, Math.abs(sim.x[0] - REFTRACE.p[i]));
+  }
+  el.innerHTML = '<span style="color:' + (maxd < 1e-2 ? '#7bd66b' : '#e0619e') + '">'
+    + (maxd < 1e-2 ? '✓' : '✗') + '</span> 与 Python 参考轨迹逐点比对（Energy+LQR，'
+    + ((REFTRACE.th.length - 1) * REFTRACE.stride * DT).toFixed(1) + ' s）：状态最大偏差 <b style="color:#fff">'
+    + maxd.toExponential(2) + '</b>（角度 ' + maxth.toExponential(1) + ' rad）';
+})();
+
+/* =====================================================================
+   9. ONLINE BATCH EVALUATION (same protocol as eval_all.py)
+   ===================================================================== */
+async function runBatch(nEp) {
+  const btn = $('btnBatch'), prog = $('batchProg'), host = $('batchTable');
+  btn.disabled = true;
+  const rng = mulberry(20250909);
+  const ics = [];
+  for (let i = 0; i < nEp; i++) {
+    ics.push([rng() * 2 - 1, (rng() * 2 - 1) * Math.PI, (rng() * 2 - 1) * 0.5, (rng() * 2 - 1) * 1.0]);
+  }
+  const rows = {};
+  const T = 12, N = Math.round(T / DT);
+  for (const k of KINDS) {
+    const st = { ok: 0, tUp: [], th: [], u: [], p: 0, rail: 0, okD: 0, thD: [] };
+    for (let e = 0; e < nEp; e++) {
+      for (const dOn of [false, true]) {
+        const s = new Sim(k, ics[e], { seed: 1 });
+        let thLate = 0, uLate = 0, uAll = 0, nLate = 0, pMax = 0, pLate = 0, rail = false, tUp = null;
+        for (let i = 0; i < N; i++) {
+          const d = (!dOn ? 0 : (s.t >= 4 && s.t < 8 ? 4 : 0));
+          s.step(0, d);
+          const th = Math.abs(wrapA(s.x[1]));
+          if (tUp === null && th < 0.1) tUp = s.t;
+          pMax = Math.max(pMax, Math.abs(s.x[0])); uAll += s.u * s.u;
+          if (s.railHit) rail = true;
+          if (i >= N * 0.75) { thLate += th * th; uLate += s.u * s.u; nLate++; pLate = Math.max(pLate, Math.abs(s.x[0])); }
+        }
+        const thRms = Math.sqrt(thLate / nLate), uRms = Math.sqrt(uAll / N);
+        const ok = Math.sqrt(thLate / nLate) < 0.15 && pLate < 1.5;
+        if (dOn) { st.okD += ok ? 1 : 0; st.thD.push(thRms); }
+        else {
+          st.ok += ok ? 1 : 0; st.th.push(thRms); st.u.push(uRms);
+          st.p += pMax; st.rail += rail ? 1 : 0;
+          if (tUp !== null) st.tUp.push(tUp);
+        }
+      }
+      prog.textContent = LABEL[k] + ' ' + (e + 1) + '/' + nEp;
+      await new Promise(r => setTimeout(r, 0));
+    }
+    const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+    rows[k] = {
+      succ: st.ok / nEp, tUp: mean(st.tUp), th: mean(st.th), u: mean(st.u),
+      p: st.p / nEp, rail: st.rail / nEp, succD: st.okD / nEp, thD: mean(st.thD)
+    };
+  }
+  let html = '<table class="mini-tbl"><thead><tr><th>控制器</th><th>成功率</th><th>摆起时间</th>'
+    + '<th>稳态 |θ|</th><th>力 RMS</th><th>max |p|</th><th>撞墙率</th><th>+4N |θ|</th><th>+4N 成功率</th></tr></thead><tbody>';
+  for (const k of KINDS) {
+    const r = rows[k];
+    html += '<tr><td><span class="pill" style="color:' + KCOL[k] + ';border-color:' + KCOL[k] + '55">'
+      + LABEL[k] + '</span></td>'
+      + '<td class="num">' + (r.succ * 100).toFixed(0) + '%</td>'
+      + '<td class="num">' + (isFinite(r.tUp) ? r.tUp.toFixed(2) + ' s' : 'n/a') + '</td>'
+      + '<td class="num">' + r.th.toFixed(4) + '</td>'
+      + '<td class="num">' + r.u.toFixed(2) + '</td>'
+      + '<td class="num">' + r.p.toFixed(2) + '</td>'
+      + '<td class="num">' + (r.rail * 100).toFixed(0) + '%</td>'
+      + '<td class="num">' + r.thD.toFixed(3) + '</td>'
+      + '<td class="num">' + (r.succD * 100).toFixed(0) + '%</td></tr>';
+  }
+  html += '</tbody></table><div class="dim" style="font-size:11.5px;margin-top:4px">'
+    + nEp + ' 组随机初值（θ₀∈±π, p₀∈±1 m），12 s 闭环，与 Python 侧同协议、同一定义（力 RMS 取全程）。'
+    + '两次评测的随机样本不同，个别数字会波动——例如 Transformer 在 +4 N 持续扰动下的成功率在 80%~100% 之间随样本跳动，'
+    + '上表（60 组）与本地（' + nEp + ' 组）不必逐位一致；LQR 的摆起时间这里只统计"真的立起来过"的回合，所以与上表的 n/a 不同也属正常。</div>';
+  host.innerHTML = html;
+  prog.textContent = '完成';
+  btn.disabled = false;
+}
+$('btnBatch').addEventListener('click', () => runBatch(12));
+
+/* =====================================================================
+   10. BOOT
+   ===================================================================== */
+window.__errs = [];
+window.addEventListener('error', e => { window.__errs.push(String(e.message)); });
+resetAll();
+drawLoss($('lossChart'));
+if (document.getElementById('rlChart')) drawRL($('rlChart'));
+render();
+requestAnimationFrame(loop);
+window.addEventListener('resize', () => { render(); });
+</script>
+</body>
+</html>

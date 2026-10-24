@@ -1,0 +1,397 @@
+<style>
+pre.tree{margin:8px 0 0;font-family:var(--mono);font-size:11.5px;line-height:1.65;color:var(--tx2);
+  background:#0b131b;border:1px solid var(--line);border-radius:8px;padding:11px 13px;overflow-x:auto}
+table.mini-tbl{font-size:12.5px}
+</style>
+<script>
+/* =====================================================================
+   DATA BLOCKS (injected by build.py)
+   ===================================================================== */
+const CFG = __CFG_JSON__;
+const BLOB = __BLOB_JSON__;            /* BC + DAgger policy  */
+const BLOB_RL = __BLOB_RL_JSON__;      /* PPO fine-tuned policy */
+const RL_LOGS = __RL_LOGS_JSON__;
+const PROBES2 = __PROBES2_JSON__;
+const RLCOMPARE = __RLCOMPARE_JSON__;
+const PROBES = __PROBES_JSON__;
+const TRAINLOG = __TRAINLOG_JSON__;
+const PYMETRICS = __PYMETRICS_JSON__;
+const REFTRACE = __REFTRACE_JSON__;
+
+/* =====================================================================
+   1. PLANT  — identical to build/plant.py
+   ===================================================================== */
+const PL = CFG.plant;
+const DT = PL.dt;
+
+function deriv(x, u) {
+  const pos = x[0], th = x[1], v = x[2], w = x[3];
+  const s = Math.sin(th), c = Math.cos(th);
+  const den = PL.m_c + PL.m_p * s * s;                 // = m_c + m_p sin^2(theta)
+  const pdd = (u - PL.b_c * v + PL.m_p * PL.l * s * w * w
+             + PL.b_p * c * w - PL.m_p * PL.g * s * c) / den;
+  const wdd = (PL.g * s - c * pdd - PL.b_p * w / (PL.m_p * PL.l)) / PL.l;
+  return [v, w, pdd, wdd];
+}
+
+function rk4(x, u, dt, sub) {
+  sub = sub || 2;
+  const h = dt / sub;
+  let y = x.slice();
+  for (let i = 0; i < sub; i++) {
+    const k1 = deriv(y, u);
+    const y2 = [y[0] + .5 * h * k1[0], y[1] + .5 * h * k1[1], y[2] + .5 * h * k1[2], y[3] + .5 * h * k1[3]];
+    const k2 = deriv(y2, u);
+    const y3 = [y[0] + .5 * h * k2[0], y[1] + .5 * h * k2[1], y[2] + .5 * h * k2[2], y[3] + .5 * h * k2[3]];
+    const k3 = deriv(y3, u);
+    const y4 = [y[0] + h * k3[0], y[1] + h * k3[1], y[2] + h * k3[2], y[3] + h * k3[3]];
+    const k4 = deriv(y4, u);
+    y = [0, 1, 2, 3].map(i => y[i] + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+  }
+  return y;
+}
+
+function energy(x) {
+  return 0.5 * PL.m_p * PL.l * PL.l * x[3] * x[3] + PL.m_p * PL.g * PL.l * (Math.cos(x[1]) - 1);
+}
+const wrapA = a => { const t = (a + Math.PI) % (2 * Math.PI); return (t < 0 ? t + 2 * Math.PI : t) - Math.PI; };
+const clamp = (v, lo, hi) => v < lo ? lo : (v > hi ? hi : v);
+const clampU = v => clamp(v, -PL.u_max, PL.u_max);
+
+/* =====================================================================
+   2. CLASSICAL CONTROLLERS  — mirror of build/controllers.py
+   ===================================================================== */
+
+/* exact inversion of the cart channel: force -> commanded p_ddot */
+function cartInv(x, pdd) {
+  const th = x[1], v = x[2], w = x[3];
+  const s = Math.sin(th), c = Math.cos(th);
+  const den = PL.m_c + PL.m_p * s * s;
+  return pdd * den + PL.b_c * v - PL.m_p * PL.l * s * w * w
+       - PL.b_p * c * w + PL.m_p * PL.g * s * c;
+}
+
+function LQRCtrl() {
+  const K = CFG.lqr.K;
+  return {
+    kind: 'lqr', name: 'LQR', reset() {},
+    u(x) {
+      const e = [x[0], x[1], x[2], x[3]];
+      let s = 0;
+      for (let i = 0; i < 4; i++) s += K[i] * e[i];
+      return clampU(-s);
+    }
+  };
+}
+
+function EnergyCtrl() {
+  const c = CFG.energy;
+  return {
+    kind: 'energy', name: 'Energy', reset() {},
+    u(x) {
+      const E = energy(x);
+      const drive = Math.tanh(x[3] * Math.cos(x[1]) / c.phi);
+      const pdd = c.kE * (E - c.Ed) * drive - c.kx * x[0] - c.kd * x[2];
+      return clampU(cartInv(x, pdd));
+    }
+  };
+}
+
+function SMCCtrl() {
+  const c = CFG.smc;
+  return {
+    kind: 'smc', name: 'SMC', reset() {},
+    u(x) {
+      const pos = x[0], th = x[1], v = x[2], w = x[3];
+      const s = Math.sin(th);
+      let cs = Math.cos(th);
+      cs = Math.sign(cs) * Math.max(Math.abs(cs), 0.25);      // bounded 1/cos
+      const den = PL.m_c + PL.m_p * s * s;
+      const thRef = -clamp(c.kp * pos + c.kd * v, -0.25, 0.25);
+      const sl = w + c.lam * (th - thRef);
+      const sat = clamp(sl / c.phi, -1, 1);
+      const pdd = (PL.g * s + PL.l * c.lam * w + PL.l * c.eta * sat + PL.l * c.ks * sl) / cs;
+      return clampU(pdd * den + PL.b_c * v - PL.m_p * PL.l * s * w * w
+                    - PL.b_p * cs * w + PL.m_p * PL.g * s * cs);
+    }
+  };
+}
+
+/* energy swing-up + local stabiliser with hysteresis */
+function HybridCtrl(local) {
+  const sw = CFG.sw, swing = EnergyCtrl();
+  const h = {
+    kind: local.kind === 'lqr' ? 'elqr' : 'esmc',
+    name: 'Energy+' + local.name,
+    mode: 'swing', switches: 0, local: local,
+    reset() { this.mode = 'swing'; this.switches = 0; },
+    u(x) {
+      const th = x[1], w = x[3];
+      if (this.mode === 'swing') {
+        if (Math.abs(th) < sw.th_in && Math.abs(w) < sw.w_in) {
+          this.mode = 'local'; this.switches++; this.local.reset();
+        }
+      } else if (Math.abs(th) > sw.th_out || Math.abs(w) > sw.w_out) {
+        this.mode = 'swing'; swing.reset();
+      }
+      return (this.mode === 'local' ? this.local : swing).u(x);
+    }
+  };
+  return h;
+}
+
+/* =====================================================================
+   3. TRANSFORMER POLICY  — int8 weights decoded to Float32Array
+   ===================================================================== */
+function b64bytes(b64) {
+  const bin = atob(b64), n = bin.length, a = new Uint8Array(n);
+  for (let i = 0; i < n; i++) a[i] = bin.charCodeAt(i);
+  return a;
+}
+function decodeWeights(blob) {
+  const Wt = {};
+  for (const k in blob) {
+    const e = blob[k];
+    const bytes = b64bytes(e.data);
+    const n = e.shape.reduce((a, b) => a * b, 1);
+    let arr;
+    if (e.dtype === 'i8') {
+      const q = new Int8Array(bytes.buffer, bytes.byteOffset, n);
+      arr = new Float32Array(n);
+      for (let i = 0; i < n; i++) arr[i] = q[i] * e.scale;
+    } else {
+      arr = new Float32Array(n);
+      const f = new Float32Array(bytes.buffer, bytes.byteOffset, n);
+      for (let i = 0; i < n; i++) arr[i] = f[i];
+    }
+    Wt[k] = arr;
+  }
+  return Wt;
+}
+const WSET = { bc: decodeWeights(BLOB), rl: decodeWeights(BLOB_RL) };
+let W = WSET.bc;                     /* active weight set, switched by the policy */
+
+const PH = CFG.policy.h, PF = CFG.policy.feat, PD = 32, PNH = 4, PHD = PD / PNH;
+const NLAYER = 2;
+const EPS = 1e-5;
+
+/* erf, Abramowitz-Stegun 7.1.26 (|err| < 1.5e-7) — needed for the exact GELU */
+function erf(x) {
+  const sgn = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t
+            - 0.284496736) * t + 0.254829592) * t * Math.exp(-ax * ax);
+  return sgn * y;
+}
+const gelu = x => 0.5 * x * (1 + erf(x / Math.SQRT2));
+
+function layerNorm(dst, src, off, wOff, bOff, wname) {
+  const gw = W[wname + '.weight'], gb = W[wname + '.bias'];
+  let m = 0;
+  for (let i = 0; i < PD; i++) m += src[off + i];
+  m /= PD;
+  let vr = 0;
+  for (let i = 0; i < PD; i++) { const d = src[off + i] - m; vr += d * d; }
+  vr /= PD;
+  const inv = 1 / Math.sqrt(vr + EPS);
+  for (let i = 0; i < PD; i++) dst[i] = (src[off + i] - m) * inv * gw[i] + gb[i];
+}
+
+/* one forward pass over the H x F window; returns {u, attn} where
+   attn[layer] is Float32Array(H) = attention paid by the LAST token        */
+const _h = new Float32Array(PD), _qkv = new Float32Array(PH * 3 * PD),
+      _att = new Float32Array(PH), _out = new Float32Array(PD),
+      _ff = new Float32Array(64);
+let _z = new Float32Array(PH * PD), _zn = new Float32Array(PH * PD),
+    _q = new Float32Array(PH * PD), _k = new Float32Array(PH * PD),
+    _v = new Float32Array(PH * PD), _ao = new Float32Array(PH * PD);
+
+function policyForward(win, wantAttn, variant) {
+  W = WSET[variant || 'bc'];
+  const zin = W['inp.weight'], bin = W['inp.bias'], pos = W['pos'];
+  /* embed */
+  for (let t = 0; t < PH; t++) {
+    for (let o = 0; o < PD; o++) {
+      let s = bin[o];
+      const bo = o * PF, wt = t * PF;
+      for (let j = 0; j < PF; j++) s += win[wt + j] * zin[bo + j];
+      _z[t * PD + o] = s + pos[t * PD + o];
+    }
+  }
+  const attn = [];
+  for (let L = 0; L < NLAYER; L++) {
+    const pre = 'blocks.' + L + '.';
+    /* --- attention: LN + QKV projection, one token at a time --- */
+    const wq = W[pre + 'qkv.weight'], bq = W[pre + 'qkv.bias'];
+    for (let t = 0; t < PH; t++) {
+      layerNorm(_h, _z, t * PD, 0, 0, pre + 'ln1');
+      for (let o = 0; o < 3 * PD; o++) {
+        let s = bq[o];
+        const bo = o * PD;
+        for (let i = 0; i < PD; i++) s += _h[i] * wq[bo + i];
+        _qkv[t * 3 * PD + o] = s;
+      }
+      for (let d = 0; d < PD; d++) {
+        _q[t * PD + d] = _qkv[t * 3 * PD + d];
+        _k[t * PD + d] = _qkv[t * 3 * PD + PD + d];
+        _v[t * PD + d] = _qkv[t * 3 * PD + 2 * PD + d];
+      }
+    }
+    const attnLast = new Float32Array(PH);
+    for (let h = 0; h < PNH; h++) {
+      for (let t1 = 0; t1 < PH; t1++) {
+        let mx = -1e30;
+        for (let t2 = 0; t2 <= t1; t2++) {
+          let s = 0;
+          for (let d = 0; d < PHD; d++) s += _q[t1 * PD + h * PHD + d] * _k[t2 * PD + h * PHD + d];
+          s /= Math.sqrt(PHD);
+          _att[t2] = s; if (s > mx) mx = s;
+        }
+        let sum = 0;
+        for (let t2 = 0; t2 <= t1; t2++) { _att[t2] = Math.exp(_att[t2] - mx); sum += _att[t2]; }
+        for (let t2 = 0; t2 < PH; t2++) _att[t2] = t2 <= t1 ? _att[t2] / sum : 0;
+        if (t1 === PH - 1) for (let t2 = 0; t2 < PH; t2++) attnLast[t2] += _att[t2] / PNH;
+        for (let d = 0; d < PHD; d++) {
+          let acc = 0;
+          for (let t2 = 0; t2 <= t1; t2++) acc += _att[t2] * _v[t2 * PD + h * PHD + d];
+          _ao[t1 * PD + h * PHD + d] = acc;
+        }
+      }
+    }
+    if (wantAttn) attn.push(attnLast);
+    const wp = W[pre + 'proj.weight'], bp = W[pre + 'proj.bias'];
+    for (let t = 0; t < PH; t++) {
+      for (let o = 0; o < PD; o++) {
+        let s = bp[o];
+        const bo = o * PD, tb = t * PD;
+        for (let i = 0; i < PD; i++) s += _ao[tb + i] * wp[bo + i];
+        _z[tb + o] += s;
+      }
+    }
+    /* --- ffn (LN per token, then 32->64->32) --- */
+    const w1 = W[pre + 'fc1.weight'], b1 = W[pre + 'fc1.bias'];
+    const w2 = W[pre + 'fc2.weight'], b2 = W[pre + 'fc2.bias'];
+    const DF = 64;
+    for (let t = 0; t < PH; t++) {
+      layerNorm(_h, _z, t * PD, 0, 0, pre + 'ln2');
+      for (let o = 0; o < DF; o++) {
+        let s = b1[o];
+        const bo = o * PD;
+        for (let i = 0; i < PD; i++) s += _h[i] * w1[bo + i];
+        _ff[o] = gelu(s);
+      }
+      for (let o = 0; o < PD; o++) {
+        let s = b2[o];
+        const bo = o * DF;
+        for (let i = 0; i < DF; i++) s += _ff[i] * w2[bo + i];
+        _z[t * PD + o] += s;
+      }
+    }
+  }
+  /* head on the last token */
+  layerNorm(_h, _z, (PH - 1) * PD, 0, 0, 'ln');
+  const hw = W['head.weight'], hb = W['head.bias'];
+  let o = hb[0];
+  for (let i = 0; i < PD; i++) o += _h[i] * hw[i];
+  return { u: Math.tanh(o) * CFG.policy.umax, attn: attn };
+}
+
+/* the policy, wrapped as a stateful controller (mirrors train.py PolicyCtl) */
+function TFCtrl(variant) {
+  const c = {
+    kind: variant === 'rl' ? 'tfrl' : 'tf', variant: variant || 'bc',
+    name: variant === 'rl' ? 'Transformer+RL' : 'Transformer',
+    uPrev: 0, buf: null, lastAttn: null,
+    reset() { this.uPrev = 0; this.buf = null; this.lastAttn = null; },
+    featRow(x, uPrev) {
+      return [Math.sin(x[1]), Math.cos(x[1]), x[3] / 4, x[2] / 4, x[0] / PL.x_max, uPrev / PL.u_max];
+    },
+    u(x) {
+      const f = this.featRow(x, this.uPrev);
+      if (!this.buf) {
+        this.buf = new Float32Array(PH * PF);
+        for (let t = 0; t < PH; t++) for (let j = 0; j < PF; j++) this.buf[t * PF + j] = f[j];
+      } else {
+        this.buf.copyWithin(0, PF);
+        for (let j = 0; j < PF; j++) this.buf[(PH - 1) * PF + j] = f[j];
+      }
+      const r = policyForward(this.buf, true, this.variant);
+      this.lastAttn = r.attn;
+      this.uPrev = r.u;
+      return clampU(r.u);
+    }
+  };
+  return c;
+}
+
+function makeCtrl(kind) {
+  if (kind === 'lqr') return LQRCtrl();
+  if (kind === 'elqr') return HybridCtrl(LQRCtrl());
+  if (kind === 'esmc') return HybridCtrl(SMCCtrl());
+  if (kind === 'tf') return TFCtrl('bc');
+  if (kind === 'tfrl') return TFCtrl('rl');
+  throw new Error(kind);
+}
+
+/* =====================================================================
+   4. SIMULATION CORE
+   ===================================================================== */
+function randn(rng) {                       // Box-Muller on a LCG
+  let u = 0, v = 0;
+  while (u === 0) u = rng();
+  while (v === 0) v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function Sim(kind, x0, opts) {
+  opts = opts || {};
+  this.ctrl = makeCtrl(kind);
+  this.kind = kind;
+  this.x0 = x0.slice();
+  this.rng = mulberry(opts.seed || 12345);
+  this.reset();
+}
+Sim.prototype.reset = function () {
+  this.x = this.x0.slice();
+  this.t = 0;
+  this.ctrl.reset();
+  this.u = 0; this.railHit = false;
+  this.hist = { t: [], th: [], p: [], u: [], E: [], w: [] };
+  this.push();
+};
+Sim.prototype.push = function () {
+  const h = this.hist;
+  h.t.push(this.t); h.th.push(wrapA(this.x[1])); h.p.push(this.x[0]);
+  h.u.push(this.u); h.E.push(energy(this.x)); h.w.push(this.x[3]);
+};
+Sim.prototype.step = function (noise, dist) {
+  const meas = this.x.slice();
+  if (noise > 0) {
+    meas[0] += randn(this.rng) * noise * 0.02;
+    meas[1] += randn(this.rng) * noise * 0.01;
+    meas[2] += randn(this.rng) * noise * 0.05;
+    meas[3] += randn(this.rng) * noise * 0.08;
+  }
+  const u = this.ctrl.u(meas);
+  this.u = u;
+  const utot = clampU(u + (dist || 0));
+  this.x = rk4(this.x, utot, DT, 2);
+  if (Math.abs(this.x[0]) > PL.x_max) {           // rail = inelastic stop
+    this.x[0] = Math.sign(this.x[0]) * PL.x_max;
+    this.x[2] = 0;
+    this.railHit = true;
+  }
+  this.t += DT;
+  this.push();
+};
+</script>

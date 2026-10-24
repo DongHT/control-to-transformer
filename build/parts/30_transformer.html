@@ -1,0 +1,184 @@
+<section id="transformer">
+  <h2><span class="n">03</span>数据驱动控制器：让 Transformer 学会"开这台车"</h2>
+  <p class="lead">
+    换一条完全不同的技术路线：<strong>不写任何控制律</strong>。把传统控制器当作"教练"，
+    收集 <span class="mono">(最近 0.48 s 的状态序列 → 此刻应该施加的力)</span> 的样本，
+    训一个小小的因果 Transformer 去模仿它。最终产物是一个 18k 参数的函数，
+    输入是传感器历史，输出是力——没有任何能量公式、没有模式切换、没有模型参数。
+  </p>
+
+  <div class="grid3" style="margin-top:20px">
+    <div class="card">
+      <div class="tagline">Stage 1</div>
+      <h4>专家数据采集</h4>
+      <p style="font-size:13.5px">用上一节的 <span class="mono">Energy+LQR</span> 闭环跑 300 个回合 ×8 s，
+      随机初值（θ₀ 全周分布）、随机 2–5 N 侧向扰动，并叠加 σ=1.5 N 的探索噪声，
+      让状态偏离专家轨迹以提高覆盖。</p>
+      <div class="mono" style="font-size:12px;color:var(--cy)">56,700 个窗口 · 24 步 × 6 维</div>
+    </div>
+    <div class="card">
+      <div class="tagline">Stage 2</div>
+      <h4>行为克隆（BC）</h4>
+      <p style="font-size:13.5px">MSE 回归专家动作，AdamW + OneCycle，24 epoch。
+      验证损失降到 1.5e-3 —— 但<strong>闭环成功率却是 0%</strong>。</p>
+      <div class="mono" style="font-size:12px;color:var(--mg)">val 1.45e-3 → 闭环 0/30</div>
+    </div>
+    <div class="card">
+      <div class="tagline">Stage 3</div>
+      <h4>DAgger 自采样修正</h4>
+      <p style="font-size:13.5px">让 Transformer 自己开车（继续加噪声），把它<strong>实际走到</strong>的状态
+      交给专家重新标注，追加训练。两轮、每轮 26,460 个窗口。</p>
+      <div class="mono" style="font-size:12px;color:var(--gr)">闭环 30/30 ✓</div>
+    </div>
+  </div>
+
+  <div class="note warn" style="margin-top:18px">
+    <b>这张页面里最重要的一个现象</b>：DAgger 之后<strong>离线损失反而变大了</strong>（1.45e-3 → 3.4e-3），
+    但闭环成功率从 0% 变成 100%。原因是 BC 的失败不是"拟合不准"，而是<strong>分布漂移</strong>——
+    策略一旦偏离专家轨迹，就进入了训练集里从未出现过的状态，此处的预测错误会把它推得更远。
+    DAgger 修正的是<strong>数据分布</strong>，不是损失数值。<br>
+    <span class="dim">推论：评价数据驱动控制器，必须用闭环指标，离线验证损失具有误导性。</span>
+  </div>
+
+  <h3>Token 设计：一步观测是什么</h3>
+  <p>每个时间步 k 的观测向量（6 维），刻意做成"与模型无关"的形式：</p>
+  <div class="eq">
+    z<sub>k</sub> <span class="op">=</span> [ sin θ<sub>k</sub>,&nbsp; cos θ<sub>k</sub>,&nbsp; θ̇<sub>k</sub>/4,&nbsp; ṗ<sub>k</sub>/4,&nbsp; p<sub>k</sub>/2.4,&nbsp; u<sub>k−1</sub>/12 ]<span class="op">∈</span>ℝ⁶
+    <span class="tag">角度用 sin/cos 编码，避免 ±π 处的跳变</span>
+  </div>
+  <ul>
+    <li><b>sin θ, cos θ</b>：角度本身是周期量，用三角函数编码后网络不必学"±π 是同一处"，轨迹在输入空间连续。</li>
+    <li><b>θ̇, ṗ, p</b>：除以各自的量程做尺度归一化（4 rad/s、4 m/s、导轨半长），让 6 个通道量级接近，利于优化。</li>
+    <li><b>u<sub>k−1</sub></b>：把控制器<strong>自己上一步的输出</strong>也喂回去。这是让策略具备"惯性意识"的关键——
+      它能看到自己刚刚使了多大劲，从而隐式学到执行器动态与切换节奏。</li>
+  </ul>
+  <p>
+    窗口长度 <span class="mono">H = 24</span>（0.48 s）。这个长度足以覆盖一次完整的"反向—加速—回摆"相位，
+    又短到可以在浏览器里 50 Hz 实时跑完。注意第 k 个 token 携带的是<strong>当前状态 + 上一步动作</strong>，
+    最后一个 token 就是"现在"——这个约定在训练和推理两侧必须严格一致（我在实现里踩过这个坑：
+    错位一步，闭环成功率直接掉到 0）。
+  </p>
+
+  <h3>网络结构：2 层因果注意力，只看过去</h3>
+  <div class="card" style="padding:10px;margin:14px 0">
+    <svg viewBox="0 0 1080 300" width="100%" height="auto" role="img" aria-label="Transformer 策略结构">
+      <defs>
+        <marker id="a4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 z" fill="#57a8f5"/>
+        </marker>
+      </defs>
+      <!-- token strip -->
+      <g font-family="ui-monospace" font-size="9.5">
+        <text x="16" y="26" fill="#63788d" font-size="11" fill-opacity="1">输入窗口 H=24（历史 → 现在）</text>
+        <!-- 24 small cells -->
+      </g>
+      <g id="tokrow" transform="translate(16,34)"></g>
+      <!-- causal mask matrix -->
+      <g transform="translate(20,86)">
+        <text x="0" y="-8" fill="#63788d" font-size="10.5" font-family="ui-monospace">因果掩码（下三角可见）</text>
+        <g id="maskgrid"></g>
+      </g>
+      <!-- block -->
+      <g transform="translate(250,72)">
+        <rect x="0" y="0" width="330" height="200" rx="12" fill="#101821" stroke="#2a3b4d"/>
+        <text x="14" y="20" fill="#57a8f5" font-size="12" font-family="ui-monospace">Block × 2（Pre-LN）</text>
+        <rect x="18" y="34" width="292" height="30" rx="6" fill="#16212d" stroke="#2a3b4d"/>
+        <text x="164" y="54" fill="#93a5b8" font-size="11.5" text-anchor="middle" font-family="ui-monospace">LayerNorm</text>
+        <rect x="18" y="72" width="292" height="38" rx="6" fill="#0f2725" stroke="#2fd3c0"/>
+        <text x="164" y="88" fill="#2fd3c0" font-size="11.5" text-anchor="middle" font-family="ui-monospace">Causal Multi-Head Attention</text>
+        <text x="164" y="103" fill="#63788d" font-size="10" text-anchor="middle" font-family="ui-monospace">4 heads × 8 dim, softmax(QKᵀ/√8)</text>
+        <circle cx="330" cy="91" r="9" fill="#16212d" stroke="#f2a93b"/>
+        <text x="330" y="95" fill="#f2a93b" font-size="12" text-anchor="middle">+</text>
+        <rect x="18" y="122" width="292" height="26" rx="6" fill="#16212d" stroke="#2a3b4d"/>
+        <text x="164" y="140" fill="#93a5b8" font-size="11.5" text-anchor="middle" font-family="ui-monospace">LayerNorm</text>
+        <rect x="18" y="156" width="292" height="30" rx="6" fill="#16212d" stroke="#2a3b4d"/>
+        <text x="164" y="176" fill="#93a5b8" font-size="11.5" text-anchor="middle" font-family="ui-monospace">Linear → GELU → Linear (32→64→32)</text>
+      </g>
+      <!-- head -->
+      <g transform="translate(640,72)">
+        <rect x="0" y="70" width="132" height="46" rx="8" fill="#16212d" stroke="#2a3b4d"/>
+        <text x="66" y="90" fill="#93a5b8" font-size="11.5" text-anchor="middle" font-family="ui-monospace">LN → Linear</text>
+        <text x="66" y="106" fill="#63788d" font-size="10" text-anchor="middle" font-family="ui-monospace">取最后 1 个 token</text>
+      </g>
+      <line x1="580" y1="165" x2="636" y2="165" stroke="#57a8f5" stroke-width="1.5" marker-end="url(#a4)"/>
+      <g transform="translate(800,72)">
+        <rect x="0" y="62" width="120" height="62" rx="8" fill="#1a1220" stroke="#e0619e"/>
+        <text x="60" y="86" fill="#e0619e" font-size="12" text-anchor="middle" font-family="Times New Roman" font-style="italic">u = 12·tanh(·)</text>
+        <text x="60" y="104" fill="#63788d" font-size="10" text-anchor="middle" font-family="ui-monospace">饱和平滑、天然限幅</text>
+      </g>
+      <line x1="772" y1="165" x2="796" y2="165" stroke="#57a8f5" stroke-width="1.5" marker-end="url(#a4)"/>
+      <g transform="translate(950,72)">
+        <rect x="0" y="48" width="110" height="90" rx="8" fill="#16212d" stroke="#57a8f5"/>
+        <text x="55" y="72" fill="#57a8f5" font-size="12" text-anchor="middle" font-family="ui-monospace">u ∈ ℝ</text>
+        <text x="55" y="92" fill="#93a5b8" font-size="10" text-anchor="middle" font-family="ui-monospace">推力 [N]</text>
+        <text x="55" y="112" fill="#63788d" font-size="10" text-anchor="middle" font-family="ui-monospace">|u| ≤ 12</text>
+      </g>
+      <line x1="920" y1="165" x2="946" y2="165" stroke="#57a8f5" stroke-width="1.5" marker-end="url(#a4)"/>
+      <!-- input to block arrow -->
+      <path d="M212,52 L212,64 L250,64" fill="none" stroke="#63849c" stroke-width="1.3"/>
+      <text x="150" y="288" fill="#63788d" font-size="10.5" font-family="ui-monospace">
+        18,177 参数 · int8 量化后 16.6 KB · base64 内联 29.8 KB · 单次前向 &lt; 0.2 ms
+      </text>
+    </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>超参数</th><th>取值</th><th>超参数</th><th>取值</th></tr></thead>
+    <tbody>
+      <tr><td>上下文窗口 H</td><td class="num">24 步（0.48 s）</td><td>层数 / 头数</td><td class="num">2 / 4</td></tr>
+      <tr><td>d<sub>model</sub> / d<sub>ff</sub></td><td class="num">32 / 64</td><td>归一化</td><td class="num">Pre-LN，eps 1e-5</td></tr>
+      <tr><td>位置编码</td><td class="num">可学习 (24×32)</td><td>注意力</td><td class="num">因果掩码 + 4 头</td></tr>
+      <tr><td>参数量</td><td class="num">18,177</td><td>输出</td><td class="num">12·tanh(Linear)</td></tr>
+      <tr><td>训练样本</td><td class="num">52k + 26k×2 窗口</td><td>优化器</td><td class="num">AdamW，OneCycle，lr 2e-3</td></tr>
+      <tr><td>批大小</td><td class="num">512</td><td>总 epoch</td><td class="num">24 + 10 + 10</td></tr>
+    </tbody>
+  </table>
+
+  <h3>训练曲线：注意"损失下降"和"控制成功"之间的裂缝</h3>
+  <div class="card" style="padding:14px 16px 6px">
+    <canvas id="lossChart" height="230" style="width:100%;height:230px"></canvas>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--tx3);margin:4px 0 10px">
+      <span><i style="display:inline-block;width:16px;height:2px;background:#2fd3c0;vertical-align:middle"></i> 验证 MSE（目标已按 u<sub>max</sub> 归一化）</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#f2a93b;vertical-align:middle;border-radius:2px"></i> BC 阶段（闭环 0%）</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#2fd3c0;vertical-align:middle;border-radius:2px"></i> DAgger 阶段（闭环 100%）</span>
+    </div>
+  </div>
+
+  <h3>它到底在看什么</h3>
+  <p>
+    把权重跑起来之后，注意力图能回答一个很自然的问题：这个策略是"看最近两步做微分"，还是"记住一整段历史"？
+    实测（闭环，700 步，统计最后一个 token 的注意力分布）：<strong>两层注意力都几乎铺满整个 24 步窗口</strong>——
+    第 2 层的等效跨度约 18–20 步、中心落在 10 步附近（窗口中点 11.5），摆起与稳摆两个阶段差别很小；
+    第 1 层在稳摆阶段略微向近期收缩（中心 9.7 → 7.3 步）。
+    换句话说，它把 0.48 s 的历史当作一个"相位/阻尼估计器"来用，
+    而不是在最近几个采样点上做数值微分——这恰好解释了它为什么能把传统控制器的"模式切换"
+    复现成一个连续映射。
+  </p>
+
+  <h3>导出与浏览器内推理</h3>
+  <p>
+    训练在 PyTorch 里完成，但<strong>部署侧不依赖任何框架</strong>：权重逐张量量化为 int8（偏置与
+    LayerNorm 参数保留 fp32），连同 scale 一起 base64 内联进本页面。
+    浏览器加载时解码成 <span class="mono">Float32Array</span>，用一段约 90 行的手写前向传播
+    （LayerNorm → 多头因果注意力 → GELU FFN → tanh）在 50 Hz 控制周期内完成推理。
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h4>量化代价（实测）</h4>
+      <dl class="kv">
+        <dt>参数量</dt><dd>18,177（fp32 ≈ 71 KB）</dd>
+        <dt>int8 体积</dt><dd>16.6 KB + 偏置 6.1 KB</dd>
+        <dt>单点最大误差</dt><dd>0.14 N（u<sub>max</sub> 的 1.2%）</dd>
+        <dt>闭环影响</dt><dd>成功率 100% 不变，摆起时间 2.70 → 2.74 s</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h4>页面内自检</h4>
+      <p style="font-size:13.5px;margin-top:4px">
+        页面加载时会把 5 组真实窗口输入跑一遍 JS 前向传播，并与 PyTorch（int8 权重）的输出逐个比对，
+        结果显示在实验台顶部。
+      </p>
+      <div class="mono" id="portCheck" style="font-size:12.5px;color:var(--tx3)">检查中…</div>
+    </div>
+  </div>
+</section>
