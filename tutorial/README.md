@@ -17,6 +17,7 @@
 | **视频④** | `out/t4_前向逐算子.mp4` | 3:43　**9 个算子逐个讲**：公式 ↔ 源码 ↔ 真实数值（代码由源码实时切片）|
 | **视频⑤** | `out/t5_反向逐算子.mp4` | 3:54　**每个雅可比的推导 ↔ 对应代码**：tanh、LN、softmax、注意力、FFN、残差、验证 |
 | **视频⑥** | `out/t6_串起来.mp4` | 3:22　**全链路**：一次迭代 → 训练循环 → 参数更新 → int8 部署 → 闭环应用 |
+| **视频⑦** | `out/t7_训练方法.mp4` | 3:37　**优化器**：SGD→Momentum→RMSProp→Adam→AdamW，二维病态曲面轨迹 + 真实模型对比 |
 | **numpy 实现** | `code/tinytf_numpy.py` | 前向 40 行 + 手写反向 80 行 + AdamW，无任何自动微分 |
 | **torch 实现** | `code/tinytf_torch.py` | 等价结构，含权重互转（`state_from_numpy` / `numpy_from_state`）|
 | **对齐检验** | `code/parity_test.py` | 与 autograd、中心差分双重验证 |
@@ -63,6 +64,28 @@
 代码块采用 **VS Code Dark+ 配色**：关键字 `#569CD6`、流程控制 `#C586C0`、函数名 `#DCDCAA`、
 参数 `#9CDCFE`、字符串 `#CE9178`、数字 `#B5CEA8`、注释 `#6A9955`，
 并带"当前行"底纹，跟着旁白逐行高亮。
+
+## 第七集：训练方法（优化器）
+
+前面讲的是"梯度怎么算"，这一集讲"拿到梯度后怎么走"。所有曲线与轨迹都是**真实迭代**算出来的
+（`code/optim_demo.py`），不是示意图。
+
+| 优化器 | 公式 | 本模型实测（3 epoch） |
+|---|---|---|
+| SGD | $\theta\leftarrow\theta-\eta g$ | $\eta{=}10^{-3}$：44.2 → 4.47；$\eta{=}2\times10^{-2}$：**发散**（70.7 → 72.0）|
+| Momentum | $v\leftarrow\beta v+g$ | $\eta{=}10^{-3}$：63.5 → 59.9（有效 η 被放大 10 倍，震荡）|
+| RMSProp | $\theta\leftarrow\theta-\eta g/(\sqrt v+\varepsilon)$ | 57.6 → 0.043 |
+| Adam | $+\hat m/\sqrt{\hat v}$ 偏差修正 | **7.04 → 0.047** |
+| AdamW | 解耦 $\lambda\theta$ | 同 Adam（本模型量级下差异小）|
+
+两个关键可视化：
+
+- **二维病态曲面** $f=\tfrac12(x^2+\kappa y^2)$（$\kappa=50$）上的真实轨迹：
+  60 步后 SGD $5.7\times10^{-2}$、Momentum $4.4\times10^{-2}$、RMSProp $2\times10^{-77}$、Adam $2.5\times10^{-2}$；
+- **逐参数步长**：第一步时 SGD 下 `w_head` 的步长是 `l1.W_qkv` 的 **31 倍**，Adam 下两者完全相同。
+
+还讲了两个容易含混的点：`1−β₂ᵗ=0.001` 时不做偏差修正会把首步放大 **31.6 倍**；
+Adam 加 L2 与 AdamW 的区别（衰减是否被二阶矩归一化），以及为什么 LayerNorm 参数/位置编码/bias 不该衰减。
 
 ## 快速验证（三分钟）
 
