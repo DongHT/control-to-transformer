@@ -74,7 +74,7 @@ def s2(cv, t, dur):
 
 
 def s3(cv, t, dur):
-    title(cv, "前向：六行公式走完一层")
+    title(cv, "前向：6 行公式走完一层")
     rows = [r"z = xW_{\mathrm{in}}^{\top}+b_{\mathrm{in}}+\mathrm{pos}",
             r"h = \mathrm{LN}_1(z)",
             r"q,k,v = hW_{qkv}^{\top}+b,\quad a=\mathrm{softmax}\Big(\frac{qk^{\top}}{\sqrt{d_h}}+M\Big)",
@@ -92,7 +92,7 @@ def s3(cv, t, dur):
 
 
 def s4(cv, t, dur):
-    title(cv, "反向①：两个雅可比决定稳定性")
+    title(cv, "反向 ①：两个雅可比决定稳定性")
     a = appear(t, 0.3, 0.8)
     cv.text(110, 180, "softmax", size=20, color=CY, alpha=a)
     math_(cv, 110, 226, r"\frac{\partial a_i}{\partial s_j}=a_i(\delta_{ij}-a_j)", 20, INK)
@@ -118,7 +118,7 @@ def s4(cv, t, dur):
 
 
 def s5(cv, t, dur):
-    title(cv, "反向②：注意力与残差")
+    title(cv, "反向 ②：注意力与残差")
     a = appear(t, 0.3, 0.8)
     math_(cv, 110, 196, r"\frac{\partial\mathcal{L}}{\partial V}=A^{\top}G,\qquad"
                         r"\frac{\partial\mathcal{L}}{\partial A}=GV^{\top}", 20, INK)
@@ -194,14 +194,14 @@ SHOTS = [
         "参数量一万八千一百七十七。",
     ], draw=s2, min_dur=19.0),
     dict(name="forward", say=[
-        "前向可以写成六行公式。",
+        "前向可以写成 6 行公式。",
         "嵌入加位置编码；归一化；投影出 QKV 并做带掩码的 softmax；加权求和后投影、加残差。",
         "然后第二个归一化、前馈、第二个残差；最后取最后一个 token 输出。",
         "每一行都是一个可以单独写单元测试的运算块。",
     ], draw=s3, min_dur=18.0),
     dict(name="jac1", say=[
         "反向的第一组关键公式是 softmax 和 LayerNorm 的雅可比。",
-        {"say": "softmax 的雅可比展开后自带“减基线”：所有上游梯度相同时，结果为零。",
+        {"say": "softmax 的雅可比展开后自带“减基线”：所有上游梯度相同时，结果为 0。",
          "tts": "softmax 的雅可比展开后自带减基线：所有上游梯度相同时，结果为零。"},
         {"say": "LayerNorm 的梯度里有两项修正，分别抵消整体平移与整体缩放。",
          "tts": "LayerNorm 的梯度里有两项修正，分别抵消整体平移与整体缩放。"},

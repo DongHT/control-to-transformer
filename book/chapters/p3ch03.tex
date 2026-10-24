@@ -1,0 +1,69 @@
+% 由 tutorial.tex 自动拆分为第 13 章
+\chapter{纯 numpy 实现}
+\section{代码骨架}
+
+\begin{lstlisting}[caption={tinytf\_numpy.py 的核心结构}]
+class TinyTF:
+    def forward(self, x, return_cache=False):
+        z = x @ self.p["W_in"].T + self.p["b_in"] + self.p["pos"]   # (B,T,d)
+        for l in range(self.L):
+            h, c_ln1 = ln_forward(z, g1, b1)          # LN1
+            q, k, v = self.qkv(h)                     # (B,H,T,dh)
+            a = softmax(mask(q @ k.transpose / sqrt(dh)))
+            z = z + self.proj(merge(a @ v))           # 残差 1
+            h2, c_ln2 = ln_forward(z, g2, b2)         # LN2
+            z = z + self.fc2(gelu(self.fc1(h2)))      # 残差 2
+            cache.append(...)                         # 存所有中间量
+        r = self.head(ln(z[:, -1]))                   # 只取最后一个 token
+        return self.u_max * np.tanh(r)
+
+    def backward(self, dU, cache):
+        # 反向走一遍：tanh -> head -> LN -> 每层(FFN -> LN2 -> 残差 -> 注意力 -> LN1 -> 残差)
+        ...
+\end{lstlisting}
+
+\section{五个易错点}
+
+这一节是本教程的"避坑清单"——每一条我都在实现中真实踩过。
+
+\begin{enumerate}[leftmargin=1.6em,itemsep=4pt]
+  \item \textbf{多头 reshape 的顺序}。$(B,T,d)\to(B,T,H,d_h)$ 之后必须
+        \texttt{transpose(1,2)} 变成 $(B,H,T,d_h)$，否则"头"会切在时间维上。
+        反传时要逆序做 \texttt{transpose(0,2,1,3).reshape(B,T,d)}。
+  \item \textbf{softmax 的减基线项不能漏}。只写 $A\odot\frac{\partial\mathcal{L}}{\partial A}$
+        会漏掉 $-\sum_jA_jg_j$，梯度整体偏移，训练仍能下降但收敛变差。
+  \item \textbf{LayerNorm 用紧凑式}。按 $d\mu,d\sigma^2$ 逐步展开也能推出来，
+        但式 \eqref{eq:lnback} 更短且数值更稳。
+  \item \textbf{$W_2$ 与 $b_2$ 的梯度来自残差主干}。$z=z_1+W_2\,\mathrm{GELU}(W_1h_2)$：
+        应该用 $\partial\mathcal{L}/\partial z$（主干）而不是 $\partial\mathcal{L}/\partial \mathrm{act}$
+        ——我最初写成了后者，形状立刻从 $(d,f)$ 变 $(f,f)$，被形状检查抓到。
+  \item \textbf{掩码位置的梯度}。不需要显式清零：$a=0\Rightarrow \partial\mathcal{L}/\partial S=0$。
+        但如果用 $-1e4$ 而不是 $-\infty$，$a$ 会是 $10^{-4343}\approx0$（仍是 $0$），安全；
+        用 $-1$ 就错了。
+\end{enumerate}
+
+\section{与 autograd 逐位对齐}
+
+\texttt{parity\_test.py} 把同一套权重分别装进 numpy 版与 torch 版，
+同一个损失函数、同一个上游梯度：
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+量 & 最大绝对偏差 & 说明 \\
+\midrule
+前向输出 $u$ & $3.1\times10^{-15}$ & float64 舍入量级 \\
+损失 $\mathcal{L}$ & $<10^{-15}$ & 完全一致 \\
+31 个参数张量的梯度 & $\mathbf{3.0\times10^{-14}}$ & 手推反向 $\equiv$ autograd \\
+\midrule
+中心差分（$h=10^{-6}$，3 个抽样元素） & 相对误差 $5\times10^{-11}\sim8\times10^{-9}$ & 与框架无关的第三方证据 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{quote}
+\textbf{这三行数字就是"实现正确"的定义}。
+如果手推梯度有任何一个符号或转置错，偏差不会停在 $10^{-14}$，而会到 $10^{-2}$ 甚至形状不匹配。
+\end{quote}
+

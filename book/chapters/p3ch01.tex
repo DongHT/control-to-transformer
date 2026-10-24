@@ -1,0 +1,100 @@
+% 由 tutorial.tex 自动拆分为第 11 章
+\chapter{为什么长这样：从 RNN 到注意力}
+\section{序列建模的三代方案}
+
+我们要学的是一个映射 $\pi:\ \mathbb{R}^{T\times F}\to\mathbb{R}$（$T$ 步历史、每步 $F$ 维特征，
+输出一个标量）。历史上解决它有三条路：
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+方案 & 关键运算 & 参数随 $T$ 增长 & 任意两步的"路径长度" \\
+\midrule
+MLP（展平） & $W\,\mathrm{vec}(x)$ & 线性增长 & $1$（但无结构先验）\\
+RNN & $h_t=f(h_{t-1},x_t)$ & 不增长 & $O(|t-s|)$ 步 \\
+Attention & $\sum_s a_{ts}v_s$ & 不增长 & $O(1)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{RNN 的两个硬伤}
+
+设 $h_t=\tanh(Wh_{t-1}+Ux_t)$。沿时间反传时，梯度要连乘
+\begin{equation}
+  \frac{\partial h_t}{\partial h_s}=\prod_{k=s+1}^{t}\frac{\partial h_k}{\partial h_{k-1}}
+  =\prod_{k}\mathrm{diag}\big(1-\tanh^2(\cdot)\big)W .
+\end{equation}
+若 $W$ 的最大奇异值 $\sigma<1$，连乘\textbf{指数衰减}（梯度消失）；$\sigma>1$ 则指数爆炸。
+这是第一个硬伤：\textbf{长程依赖无法稳定学习}。
+
+第二个硬伤是工程性的：$h_t$ 依赖 $h_{t-1}$，\textbf{无法并行}。一条 $T=1000$ 的序列，
+训练时只能串行展开 $1000$ 次。
+
+\begin{quote}
+\textbf{Transformer 的两个回答}：
+（1）让任意两个位置\textbf{直接相连}（路径长度 $O(1)$）；
+（2）让所有位置\textbf{同时计算}（矩阵乘法的并行性）。
+\end{quote}
+
+\section{检索视角：注意力到底是什么}
+
+把历史看成一张"键值表" $\{(k_s,v_s)\}_{s\le t}$，当前时刻有一个"查询" $q_t$。
+我们要的是"\textbf{按需回看}"：找到与 $q_t$ 最相关的 $k_s$，取出对应的 $v_s$。
+
+硬检索是 $\arg\max_s q_t^\top k_s$——不可微，无法训练。把它软化：
+\begin{equation}
+  a_{ts}=\frac{\exp(q_t^\top k_s/\sqrt{d_h})}{\sum_{s'\le t}\exp(q_t^\top k_{s'}/\sqrt{d_h})},
+  \qquad
+  y_t=\sum_{s\le t}a_{ts}\,v_s .
+  \label{eq:attn}
+\end{equation}
+$a_{ts}$ 就是\textbf{注意力权重}，$y_t$ 是值的加权平均。整个式 \eqref{eq:attn} 对
+$q,k,v$ 都是可微的，于是可以用梯度下降学习"该看哪里"。
+
+
+\section{数据流与张量形状}
+
+\begin{center}
+\small
+\begin{tabular}{@{}clcl@{}}
+\toprule
+步 & 运算 & 形状 & 参数量 \\
+\midrule
+1 & 输入窗口 $x$ & $B\times T\times F$ & -- \\
+2 & 线性嵌入 $W_{\text{in}}x+b$ & $B\times T\times d$ & $dF+d$ \\
+3 & 加可学习位置编码 & $B\times T\times d$ & $Td$ \\
+4 & LN1 & $B\times T\times d$ & $2d$ \\
+5 & QKV 投影 & $B\times T\times 3d$ & $3d^2+3d$ \\
+6 & 分头 $\to$ 缩放点积 + 因果掩码 & $B\times H\times T\times T$ & -- \\
+7 & softmax $\to$ 加权求和 $AV$ & $B\times H\times T\times d_h$ & -- \\
+8 & 合并 + 输出投影 & $B\times T\times d$ & $d^2+d$ \\
+9 & 残差 $z\leftarrow z+\cdot$ & $B\times T\times d$ & -- \\
+10 & LN2 $\to$ FFN($d\to f\to d$) & $B\times T\times d$ & $2df+f+d$ \\
+11 & 残差 & $B\times T\times d$ & -- \\
+12 & $4$--$11$ 重复 $L$ 次 & & \\
+13 & 取最后 token $\to$ LN $\to$ 线性 & $B\times 1$ & $2d+d+1$ \\
+14 & $u=u_{\max}\tanh(\cdot)$ & $B$ & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+本教程取 $T=24,\ F=6,\ d=32,\ H=4,\ d_h=8,\ f=64,\ L=2$，合计
+\begin{equation}
+  \underbrace{(6\cdot32+32)}_{224}+\underbrace{24\cdot32}_{768}
+  +2\cdot\underbrace{(2\cdot32+3\cdot32^2+3\cdot32+32^2+32+2\cdot32+64\cdot32+64+32\cdot64+32)}_{8544}
+  +2\cdot32+33=\mathbf{18{,}177}.
+\end{equation}
+
+\section{一个必须强调的约束：因果性}
+
+解码器式的模型只能看过去。实现上在 softmax 之前把上三角位置置 $-\infty$：
+\begin{equation}
+  M_{ts}=\begin{cases}0,& s\le t\\-\infty,& s>t\end{cases},\qquad
+  s_{ts}=\frac{q_t^\top k_s}{\sqrt{d_h}}+M_{ts}.
+\end{equation}
+\begin{quote}
+\textbf{训练时也必须加掩码}。否则模型会学到一个依赖未来输入的"作弊解"：
+训练损失极低，部署时那些输入根本不存在。这是实现中最容易犯且最难发现的错误之一。
+\end{quote}
+

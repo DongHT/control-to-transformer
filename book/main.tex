@@ -1,0 +1,203 @@
+% !TEX program = xelatex
+% 倒立摆控制：从拉格朗日到 Transformer —— 完整教程（合订本）
+% 编译：cd book && xelatex main.tex && xelatex main.tex
+\documentclass[UTF8,11pt,openany]{ctexbook}
+
+\usepackage[margin=2.4cm,top=2.6cm,bottom=2.6cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{empheq}
+\usepackage{booktabs,array,multirow}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+% 图片搜索路径：课程讲义图、教程插图
+\graphicspath{{../course/latex/}{../tutorial/out/}{../course/out/}}
+
+% ---------- 版式 ----------
+\linespread{1.22}
+\setlength{\parskip}{0.35em}
+\captionsetup{font=small,labelfont=bf}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 倒立摆控制：从拉格朗日到 Transformer}
+\fancyhead[R]{\small\leftmark}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+% ---------- 定理与提示盒 ----------
+\newtheorem{proposition}{命题}[chapter]
+\newtheorem{remark}[proposition]{注}
+
+\newcommand{\keypoint}[1]{%
+  \par\medskip\noindent
+  \colorbox{gray!10}{\parbox{\dimexpr\linewidth-2\fboxsep}{%
+  \small\setlength{\parskip}{0.25em}#1}}\par\medskip}
+
+\newcommand{\pitfall}[1]{%
+  \par\medskip\noindent
+  \colorbox{orange!8}{\parbox{\dimexpr\linewidth-2\fboxsep}{%
+  \small\textbf{坑}\quad #1}}\par\medskip}
+
+% ---------- 代码 ----------
+\definecolor{codebg}{RGB}{248,249,251}
+\lstdefinestyle{py}{
+  language=Python, backgroundcolor=\color{codebg}, basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue!60!black}, commentstyle=\color{green!35!black},
+  stringstyle=\color{red!55!black},
+  numbers=left, numberstyle=\tiny\color{gray}, numbersep=8pt,
+  frame=single, rulecolor=\color{gray!40}, breaklines=true, showstringspaces=false,
+  columns=fullflexible, keepspaces=true,
+  xleftmargin=14pt, framexleftmargin=12pt, aboveskip=1em, belowskip=1em
+}
+\lstset{style=py}
+
+\title{\bfseries 倒立摆控制：从拉格朗日到 Transformer\\[8pt]
+       \large 一部可以逐行验证的教程\\[4pt]
+       \normalsize 建模 · 经典控制 · 模仿学习 · Transformer 从零实现 · 强化学习}
+\author{}
+\date{}
+
+\begin{document}
+
+\frontmatter
+\maketitle
+
+\chapter*{写在前面}
+\addcontentsline{toc}{chapter}{写在前面}
+
+这本书只讲一件事：\textbf{如何把一台小车倒立摆，从一个物理系统变成一个有理论依据、能实时运行的控制器}，
+并且让每一步都可以被验证。
+
+全书分成三篇，对应三种完全不同的方法论：
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+篇 & 方法论 & 答案的形状 \\
+\midrule
+第一篇（第 1--6 章） & 经典非线性控制 & 一个解析控制律 \\
+第二篇（第 7--10 章） & 模仿学习与强化学习 & 一个 18k 参数的神经网络 \\
+第三篇（第 11--17 章） & 从零实现这个网络 & 前向、反向、优化器的每一行代码 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{怎么读}
+
+\begin{itemize}[leftmargin=1.6em,itemsep=3pt]
+  \item \textbf{只有控制背景}：读第一篇（1--6 章），它是全书的动机来源——
+        LQR 的能力边界（第 2 章）解释了为什么必须引入学习。
+  \item \textbf{只有深度学习背景}：先读第 1 章拿到模型，再直接跳到第二篇。
+  \item \textbf{想搞懂 Transformer 本身}：第三篇（11--17 章）是完整的从零实现，
+        包含手写反向传播与 autograd 的逐位对齐（梯度差 $3\times10^{-14}$）。
+  \item \textbf{想动手}：仓库里的 \texttt{index.html} 是交互式报告，
+        浏览器里可实时看四种控制器同台对比；\texttt{build/} 与 \texttt{tutorial/code/}
+        是可复现的代码。
+\end{itemize}
+
+\section*{关于“第 $N$ 讲”}
+
+章标题里的“第 $N$ 讲”是配套视频的编号（共 18 集，见附录 B）。
+章号由排版自动生成，与讲号不同——比如第一篇的第 1 章就是“第 1 讲”。
+
+\section*{可验证性}
+
+本书的每个关键数字都来自可重跑的代码，而不是估计：
+
+\begin{itemize}[leftmargin=1.6em,itemsep=2pt]
+  \item 闭环指标：$60$ 组随机初值、$12$\,s、统一成功判据（第 9 章）；
+  \item 手写反向：与 autograd 的差 $3\times10^{-14}$，另用中心差分独立复核（第 13 章）；
+  \item 优化器对比：同模型同初始化，含发散案例（第 15 章）。
+\end{itemize}
+
+\tableofcontents
+
+\mainmatter
+
+\part{建模与经典控制}
+\input{../course/latex/chapters/ch01}
+\input{../course/latex/chapters/ch02}
+\input{../course/latex/chapters/ch03}
+\input{../course/latex/chapters/ch04}
+\input{../course/latex/chapters/ch05}
+\input{../course/latex/chapters/ch06}
+
+\part{从数据到 Transformer}
+\input{../course/latex/chapters/ch07}
+\input{../course/latex/chapters/ch08}
+\input{../course/latex/chapters/ch09}
+\input{../course/latex/chapters/ch10}
+
+\part{Transformer 从零实现}
+\input{chapters/p3ch01}
+\input{chapters/p3ch02}
+\input{chapters/p3ch03}
+\input{chapters/p3ch04}
+\input{chapters/p3ch05}
+\input{chapters/p3ch06}
+\input{chapters/p3ch07}
+
+\appendix
+\part{附录}
+\input{../course/latex/chapters/chA}
+
+\chapter{资源索引：代码、视频与交互式报告}
+\label{app:index}
+
+\section{代码}
+
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+路径 & 作用 \\
+\midrule
+\texttt{build/plant.py} & 拉格朗日建模 + RK4 积分 \\
+\texttt{build/controllers.py} & LQR / 能量整定 / 滑模 / 切换 \\
+\texttt{build/dataset.py}, \texttt{train.py} & 数据生成 + BC/DAgger 训练 \\
+\texttt{build/model.py}, \texttt{export.py} & 因果 Transformer + int8 导出 \\
+\texttt{build/rl.py} & PPO 微调 + 域随机化 \\
+\texttt{build/eval\_all.py} & 五控制器统一评测 \\
+\texttt{tutorial/code/tinytf\_numpy.py} & 纯 numpy 前向 + 手写反向 \\
+\texttt{tutorial/code/tinytf\_torch.py} & torch 等价实现 + 权重互转 \\
+\texttt{tutorial/code/parity\_test.py} & 与 autograd / 有限差分对齐 \\
+\texttt{tutorial/code/optim\_demo.py} & 优化器对比实验 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{视频（18 集，约 40 分钟）}
+
+\begin{center}\small
+\begin{tabular}{@{}clcclc@{}}
+\toprule
+\# & 标题 & 时长 & \# & 标题 & 时长 \\
+\midrule
+1 & 建模 & 3:54 & 10 & 强化学习微调 & 3:04 \\
+2 & 线性基线（LQR） & 3:11 & A & 内部机制全解 & 3:17 \\
+3 & 部分反馈线性化 & 2:05 & 11 & 为什么长这样 & 2:07 \\
+4 & 能量整定 & 2:11 & 12 & 前向与反向 & 2:25 \\
+5 & 滑模控制 & 2:00 & 13 & 两种实现 & 2:37 \\
+6 & 切换与监督 & 1:32 & 14 & 前向逐算子 & 3:43 \\
+7 & 数据与模仿 & 2:33 & 15 & 反向逐算子 & 3:54 \\
+8 & 因果 Transformer & 2:28 & 16 & 串起来 & 3:22 \\
+9 & DAgger 与评测 & 2:23 & 17 & 训练方法 & 3:37 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+视频文件在 \texttt{course/out/}（第 1--10 讲与附录 A）与 \texttt{tutorial/out/}（第 11--17 集），
+每个都带 \texttt{.srt} 字幕。
+
+\section{交互式报告}
+
+\texttt{index.html} 是单文件、零依赖的交互式技术报告：浏览器内实时仿真、
+四种控制器同台动画、吸引域相图、注意力热图。双击即可打开。
+
+\end{document}

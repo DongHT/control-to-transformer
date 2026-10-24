@@ -1,0 +1,83 @@
+% 由 tutorial.tex 自动拆分为第 12 章
+\chapter{前向与反向：公式与雅可比}
+\section{LayerNorm}
+
+前向（对最后一维归一化）：
+\begin{equation}
+  \mu=\frac1d\sum_i z_i,\quad \sigma^2=\frac1d\sum_i(z_i-\mu)^2,\quad
+  \hat z=\frac{z-\mu}{\sqrt{\sigma^2+\varepsilon}},\quad y=\hat z\odot\gamma+\beta .
+\end{equation}
+反向的紧凑形式（$\bar g$ 表示对最后一维取均值）：
+\begin{equation}
+  \frac{\partial\mathcal{L}}{\partial z}
+  =\frac{\gamma}{\sigma}\Big(g-\bar g-\hat z\,\overline{(g\odot\hat z)}\Big),
+  \qquad g=\frac{\partial\mathcal{L}}{\partial y}.
+  \label{eq:lnback}
+\end{equation}
+
+\begin{quote}
+括号里两项分别在\textbf{抵消整体平移}与\textbf{整体缩放}方向的梯度分量。
+这解释了两件事：（1）LN 让每层输入的尺度一致，是 Pre-LN 结构稳定的根源；
+（2）它的梯度天然正交于两个"无用方向"，不会把残差主干推歪。
+\end{quote}
+
+\section{多头因果注意力}
+
+前向（单头，$d_h=d/H$）：
+\begin{align}
+  q&=hW_q^\top,\quad k=hW_k^\top,\quad v=hW_v^\top,\\
+  s&=\frac{qk^\top}{\sqrt{d_h}}+M,\qquad a=\mathrm{softmax}(s),\\
+  y&=a\,v .
+\end{align}
+
+\textbf{为什么除以 $\sqrt{d_h}$}：设 $q_i,k_i$ 独立、零均值、单位方差，则
+\begin{equation}
+  q^\top k=\sum_{i=1}^{d_h}q_ik_i\ \Rightarrow\
+  \mathbb{E}[q^\top k]=0,\quad \mathrm{Var}(q^\top k)=d_h .
+\end{equation}
+点积的标准差是 $\sqrt{d_h}$；不缩放会让 softmax 的输入分布过宽而饱和（梯度趋近 $0$）。
+本教程 $d_h=8$，缩放因子 $\sqrt8\approx2.83$。
+
+\textbf{反向}。记 $Y=AV$，$S$ 为 softmax 之前的分数，$G=\partial\mathcal{L}/\partial Y$：
+\begin{align}
+  \frac{\partial\mathcal{L}}{\partial A}&=G\,V^\top, &
+  \frac{\partial\mathcal{L}}{\partial V}&=A^\top G,\\
+  \frac{\partial\mathcal{L}}{\partial S}&=A\odot\Big(\frac{\partial\mathcal{L}}{\partial A}
+   -\sum_j A_{j}\,\frac{\partial\mathcal{L}}{\partial A_{j}}\Big), &
+  \frac{\partial\mathcal{L}}{\partial Q}&=\frac{1}{\sqrt{d_h}}\frac{\partial\mathcal{L}}{\partial S}K,\quad
+  \frac{\partial\mathcal{L}}{\partial K}=\frac{1}{\sqrt{d_h}}\Big(\frac{\partial\mathcal{L}}{\partial S}\Big)^\top Q .
+\end{align}
+
+\begin{quote}
+\textbf{softmax 的雅可比自带"减基线"}：$\partial a_i/\partial s_j=a_i(\delta_{ij}-a_j)$，
+链式展开后就出现 $-\sum_j a_j g_j$ 这一项。它的作用是\textbf{把梯度的均值减掉}——
+若所有 $g_j$ 相同，梯度为零（因为此时改变分数不改变 softmax 输出）。
+\keypoint{实现提示：掩码位置 $a_{ts}=0$，因此由上式得到的 $\partial\mathcal{L}/\partial S$ 在那里
+\textbf{自动为零}，不需要额外写 masked\_fill。}
+\end{quote}
+
+\section{GELU}
+
+\begin{equation}
+  \mathrm{GELU}(x)=\tfrac12x\big(1+\mathrm{erf}(x/\sqrt2)\big),\qquad
+  \frac{d}{dx}\mathrm{GELU}(x)=\tfrac12\big(1+\mathrm{erf}(x/\sqrt2)\big)
+  +\frac{x}{\sqrt{2\pi}}e^{-x^2/2}.
+\end{equation}
+与 ReLU 的区别：负半轴不是硬截断而是\textbf{软门控}，实测 $64$ 个隐单元中有 $34$ 个输入为负，
+它们被压到 $[-0.17,0)$ 而不是 $0$。
+
+\section{残差与输出头}
+
+残差把前向写成 $z\leftarrow z+f(z)$，反向时
+\begin{equation}
+  \frac{\partial\mathcal{L}}{\partial z}=\frac{\partial\mathcal{L}}{\partial z_{\text{out}}}
+  \Big(I+\frac{\partial f}{\partial z}\Big),
+\end{equation}
+单位阵 $I$ 就是"梯度高速公路"：即使 $\partial f/\partial z$ 很小，梯度也能原样传回去。
+
+输出层 $u=u_{\max}\tanh(r)$：
+\begin{equation}
+  \frac{\partial u}{\partial r}=u_{\max}\big(1-\tanh^2r\big).
+\end{equation}
+$|u|$ 接近 $u_{\max}$ 时导数趋于 $0$（饱和），这是"用 $\tanh$ 限幅"的代价。
+

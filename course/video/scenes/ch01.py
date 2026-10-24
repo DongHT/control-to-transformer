@@ -142,7 +142,7 @@ def s1(cv, t, dur):
 
 # ============================================================ S2
 def s2(cv, t, dur):
-    title(cv, "坐标约定与三条假设")
+    title(cv, "坐标约定与 3 条假设")
     idx = min(int(t / 0.01), len(FALL) - 1)
     pp, th = FALL[idx]
     a = appear(t, 0.2, 0.8)
@@ -200,7 +200,7 @@ def s3(cv, t, dur):
 
 # ============================================================ S4
 def s4(cv, t, dur):
-    title(cv, "拉格朗日方程：三行写出模型")
+    title(cv, "拉格朗日方程：3 行写出模型")
     x0, y0 = 110, 232
     a = appear(t, 0.3, 0.7)
     if a > 0:
@@ -384,7 +384,7 @@ def s8(cv, t, dur):
         cv.text(292, y, v, size=24, color=INK, alpha=aa)
     a = appear(t, 4.6, 0.8)
     cv.text(130, 556, "下一讲：LQR 与它的能力边界", size=27, color=AM, alpha=a)
-    cv.text(130, 602, "作业：复现推导，并用三个自检验证你的仿真器", size=21, color=FAINT, alpha=a)
+    cv.text(130, 602, "作业：复现推导，并用 3 个自检验证你的仿真器", size=21, color=FAINT, alpha=a)
 
 
 SHOTS = [
@@ -451,7 +451,7 @@ SHOTS = [
     ], draw=s7, min_dur=24.0),
     dict(name="summary", say=[
         "这一讲我们得到了完整模型、一个能量标量，和一个不稳定特征根。",
-        "还有三条结构性事实：分母恒正、余弦会失去权限、输入只有一个。",
+        "还有 3 条结构性事实：分母恒正、余弦会失去权限、输入只有一个。",
         "下一讲，我们用最经典的方法先在局部把它稳住：LQR。",
         "然后你会发现，它的能力边界，正好就是这一讲所说的那个局部。",
     ], draw=s8, min_dur=20.0),

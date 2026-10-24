@@ -132,11 +132,11 @@ def s4(cv, t, dur):
     a2 = appear(t, 5.2, 0.8)
     cv.text(110, 580, "每一站都用 cache 里的前向量：反向不需要重算前向", size=18, color=DIM, alpha=a2)
     a3 = appear(t, 6.2, 0.8)
-    chip(cv, 110, 626, "这就是“反向传播”四个字的全部工作方式", CY, a3, 18)
+    chip(cv, 110, 626, "这就是“反向传播”4 个字的全部工作方式", CY, a3, 18)
 
 
 def s5(cv, t, dur):
-    title(cv, "训练循环：三层嵌套")
+    title(cv, "训练循环：3 层嵌套")
     a = appear(t, 0.3, 0.8)
     lines = [
         "def train(model, X, Y, epochs=8, bs=128, lr=2e-3):",
@@ -157,7 +157,7 @@ def s5(cv, t, dur):
             ai = i
     code(cv, 90, 180, lines, size=14, active=ai, alpha=a)
     a2 = appear(t, 9.0, 0.8)
-    cv.text(760, 470, "三层：epoch → batch → 单步", size=18, color=CY, alpha=a2)
+    cv.text(760, 470, "3 层：epoch → batch → 单步", size=18, color=CY, alpha=a2)
     cv.text(760, 506, "真正的更新发生在最内层", size=18, color=DIM, alpha=a2)
     cv.text(760, 546, f"本课：8 epoch × 408 batch = 3,264 步", size=17, color=DIM, alpha=a2)
 
@@ -315,7 +315,7 @@ SHOTS = [
     ], draw=s1, min_dur=11.0),
     dict(name="overview", say=[
         "先看一次迭代的全景。",
-        "九个算子从前到后走一遍，得到一个力；和标签一比就是损失。",
+        "9 个算子从前到后走一遍，得到一个力；和标签一比就是损失。",
         "然后沿同一条流水线逆序走一遍，得到每个参数的梯度。",
         "最后 AdamW 把梯度变成参数增量。这就是一次完整的迭代。",
     ], draw=s2, min_dur=20.0),
@@ -332,17 +332,17 @@ SHOTS = [
         "所以你不需要重算前向——这也是反向传播能高效的原因。",
     ], draw=s4, min_dur=17.0),
     dict(name="loop", say=[
-        "训练循环是三层嵌套。",
+        "训练循环是 3 层嵌套。",
         "最外层是 epoch，中间是 mini-batch，最内层才是一次前向加反向加更新。",
-        {"say": "本课是八个 epoch 乘四百零八批量，一共三千二百六十四步。",
+        {"say": "本课是 8 个 epoch 乘 408 个批量，一共 3,264 步。",
          "tts": "本课是八个 epoch 乘四百零八批量，一共三千二百六十四步。"},
         "每轮结束在验证集上评估一次。",
     ], draw=s5, min_dur=18.0),
     dict(name="curve", say=[
         "训练曲线是这样。",
-        {"say": "粗青线是 numpy 手写反向，白色虚线是 torch，两条完全重合，差在十的负七次方。",
+        {"say": "粗青线是 numpy 手写反向，白色虚线是 torch，两条完全重合，差在十的负 7 次方。",
          "tts": "粗青线是 numpy 手写反向，白色虚线是 torch，两条完全重合，差在十的负七次方。"},
-        {"say": "代价是速度：numpy 慢四倍。",
+        {"say": "代价是速度：numpy 慢 4 倍。",
          "tts": "代价是速度：numpy 慢四倍。"},
     ], draw=s6, min_dur=16.0),
     dict(name="adamw", say=[
@@ -352,17 +352,17 @@ SHOTS = [
     ], draw=s7, min_dur=17.0),
     dict(name="deploy", say=[
         "训练完要部署。",
-        {"say": "逐张量量化到 int8：体积从七十一 KB 降到十六点六 KB。",
+        {"say": "逐张量量化到 int8：体积从七十一 KB 降到十 6.6 KB。",
          "tts": "逐张量量化到 int8：体积从七十一 KB 降到十六点六 KB。"},
         {"say": "单点误差不超过量程除以 $254$，实测 $0.14$ 牛顿，闭环看不出差别。",
          "tts": "单点误差不超过量程除以二百五十四，实测零点一四牛顿，闭环看不出差别。"},
-        "浏览器里单步零点三二毫秒。",
+        "浏览器里单步 0.32毫秒。",
     ], draw=s8, min_dur=17.0),
     dict(name="apply", say=[
         "最后是应用：把它装进控制回路。",
-        "传感器读四个状态，拼成二十四步窗口，模型输出一个力，力作用到小车上，再回到传感器。",
+        "传感器读 4 个状态，拼成 24 步窗口，模型输出一个力，力作用到小车上，再回到传感器。",
         "每二十毫秒走一次，也就是五十赫兹。",
-        {"say": "最终三十组初值全部成功，从下垂摆起只要 $1.9$ 秒。",
+        {"say": "最终 30 组初值全部成功，从下垂摆起只要 $1.9$ 秒。",
          "tts": "最终三十组初值全部成功，从下垂摆起只要一点九秒。"},
     ], draw=s9, min_dur=19.0),
     dict(name="summary", say=[
