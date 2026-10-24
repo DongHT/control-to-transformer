@@ -17,7 +17,7 @@ def s1(cv, t, dur):
             alpha=appear(t, 0.2, 0.9))
     cv.text(640, 340, "前向与反向", size=64, color=INK, anchor="ma", weight="bold",
             alpha=appear(t, 0.9, 0.9))
-    cv.text(640, 400, "每一层的公式、雅可比，以及 3×10⁻¹⁴ 的对齐", size=28, color=DIM, anchor="ma",
+    cv.text(640, 400, "每一层的公式、雅可比，以及 3.0e-14 的对齐", size=28, color=DIM, anchor="ma",
             alpha=appear(t, 1.7, 0.9))
     cv.line((470, 440), (810, 440), CY, width=2, alpha=0.5 * appear(t, 2.3, 0.8))
     if appear(t, 2.6, 0.9) > 0:
@@ -114,7 +114,7 @@ def s4(cv, t, dur):
     cv.text(722, 212, "两者共同的后果", size=19, color=CY, alpha=a6)
     cv.text(722, 252, "softmax：注意力越均匀，梯度越小", size=17, color=INK, alpha=a6)
     cv.text(722, 288, "LN：梯度天然正交于两个无用方向", size=17, color=INK, alpha=a6)
-    cv.text(722, 336, "⇒ Pre-LN 结构能训得很深", size=18, color=AM, alpha=a6)
+    cv.text(722, 336, "→ Pre-LN 结构能训得很深", size=18, color=AM, alpha=a6)
 
 
 def s5(cv, t, dur):
@@ -156,11 +156,11 @@ def s5(cv, t, dur):
 
 
 def s6(cv, t, dur):
-    title(cv, "对齐：3×10⁻¹⁴")
+    title(cv, "对齐：3.0e-14")
     a = appear(t, 0.3, 0.8)
-    rows = [("前向输出 u", "3.1×10⁻¹⁵", "float64 舍入量级", CY),
-            ("损失 L", "< 1×10⁻¹⁵", "完全一致", CY),
-            ("31 个参数的梯度", "3.0×10⁻¹⁴", "手推 == autograd", GR),
+    rows = [("前向输出 u", "3.1e-15", "float64 舍入量级", CY),
+            ("损失 L", "< 1.0e-15", "完全一致", CY),
+            ("31 个参数的梯度", "3.0e-14", "手推 == autograd", GR),
             ("中心差分（抽样 3 个元素）", "相对误差 5e-11~8e-9", "与框架无关的第三方验证", AM)]
     cv.text(110, 190, "量", size=16, color=FAINT, alpha=a)
     cv.text(560, 190, "最大绝对偏差", size=16, color=FAINT, alpha=a)

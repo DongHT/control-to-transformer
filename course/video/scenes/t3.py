@@ -80,7 +80,7 @@ def s3(cv, t, dur):
         ("② softmax 减基线项", "漏掉 −Σ a_i g_i 会拖慢收敛", MG),
         ("③ W2 / b2 的梯度", "来自残差主干 dz，不是 dact", MG),
         ("④ LayerNorm 紧凑式", "比逐步展开更短也更稳", CY),
-        ("⑤ 掩码位置的梯度", "a=0 ⇒ dS=0，无需再清零", CY),
+        ("⑤ 掩码位置的梯度", "a=0 → dS=0，无需再清零", CY),
     ]
     for i, (k, v, col) in enumerate(items):
         aa = appear(t, 0.5 + 0.55 * i, 0.5)

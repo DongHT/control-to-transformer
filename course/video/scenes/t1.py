@@ -113,7 +113,7 @@ def s4(cv, t, dur):
     a4 = appear(t, 4.0, 0.9)
     if a4 > 0:
         X0, Y0, X1, Y1 = 110, 350, 600, 550
-        axes(cv, X0, Y0, X1, Y1, a4, "d_h", "std(qᵀk)")
+        axes(cv, X0, Y0, X1, Y1, a4, "d_h", "std(q^Tk)")
         sx = lambda v: X0 + v / 16 * (X1 - X0)
         sy = lambda v: Y1 - v / 4.2 * (Y1 - Y0)
         for v in (0, 1, 2, 3, 4):
@@ -141,7 +141,7 @@ def s5(cv, t, dur):
             ok = j <= i
             cv.rect(x, y, x + 26, y + 26, CY if ok else (40, 50, 62), width=0,
                     alpha=(0.55 if ok else 0.9) * a, fill_alpha=(0.32 if ok else 0.5) * a)
-    cv.text(110, 176, "上三角被置为 −∞ ⇒ 权重严格为 0", size=17, color=FAINT, alpha=a)
+    cv.text(110, 176, "上三角被置为 −∞ → 权重严格为 0", size=17, color=FAINT, alpha=a)
     cv.text(110, 200 + n * 30 + 10, "key（历史）→", size=15, color=FAINT, alpha=a)
     cv.text(110, 200 + n * 30 + 34, "↓ query（当前）", size=15, color=FAINT, alpha=a)
 

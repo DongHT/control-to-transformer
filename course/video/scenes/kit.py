@@ -109,18 +109,24 @@ MENLO = "/System/Library/Fonts/Menlo.ttc"
 
 def code(cv, x, y, lines, size=15, color=(70, 84, 100), hl=None, hl_color=None,
          lh=None, alpha=1.0, tag="code"):
-    """等宽代码块；hl 为要高亮的行号集合。返回 (宽, 高)。"""
-    font = ImageFont.truetype(MENLO, int(round(size * cv.ss)), index=0)
+    """等宽代码块：逐字符选字体（ASCII→Menlo，其它→宋体），保证不会有方框。"""
+    menlo = ImageFont.truetype(MENLO, int(round(size * cv.ss)), index=0)
+    song = ImageFont.truetype("/System/Library/Fonts/Songti.ttc", int(round(size * cv.ss)), index=6)
     d = ImageDraw.Draw(cv.img)
     lh = lh or size * 1.55
     hl = hl or set()
     hl_color = hl_color or (200, 130, 20)
-    w = 0.0
+    wmax = 0.0
     for i, ln in enumerate(lines):
         c = hl_color if i in hl else color
-        d.text((x * cv.ss, (y + i * lh) * cv.ss), ln, font=font,
-               fill=(c[0], c[1], c[2], int(255 * alpha)))
-        w = max(w, font.getlength(ln) / cv.ss)
+        col = (c[0], c[1], c[2], int(255 * alpha))
+        cx = x * cv.ss
+        yy = (y + i * lh) * cv.ss
+        for ch in ln:
+            f = menlo if ord(ch) < 128 else song
+            d.text((cx, yy), ch, font=f, fill=col)
+            cx += f.getlength(ch)
+        wmax = max(wmax, cx / cv.ss - x)
     h = len(lines) * lh
-    cv.boxes.append((x, y - size * 0.9, x + w, y - size * 0.9 + h, tag))
-    return w, h
+    cv.boxes.append((x, y - size * 0.9, x + wmax, y - size * 0.9 + h, tag))
+    return wmax, h

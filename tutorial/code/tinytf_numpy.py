@@ -145,7 +145,7 @@ class TinyTF:
         """dU:(B,) 损失对 u 的梯度。返回与 self.p 同键的梯度字典。
 
         计算图（每层）：
-          z ──► LN1 ──► QKV ──► S=QKᵀ/√dh ──► softmax ──► A·V ──► proj ──► ⊕ ─┐
+          z ──► LN1 ──► QKV ──► S=QK^T/√dh ──► softmax ──► A·V ──► proj ──► ⊕ ─┐
           │                                                                     │
           └─────────────────────────────────────────────────────────────────────┴─► z1
           z1 ──► LN2 ──► FFN ──► GELU ──► FFN ──► ⊕ ──► z
@@ -197,7 +197,7 @@ class TinyTF:
             dvv = np.einsum("bhts,bhtd->bhsd", c["a"], dy)
             # softmax 反向：ds = a * (da - sum(da*a))
             dsm = c["a"] * (da - (da * c["a"]).sum(-1, keepdims=True))
-            # s = QKᵀ/√dh，掩码位置 a=0 ⇒ ds=0，无需显式处理
+            # s = QK^T/√dh，掩码位置 a=0 → ds=0，无需显式处理
             dq = np.einsum("bhts,bhsd->bhtd", dsm, c["k"]) / np.sqrt(nh)
             dkk = np.einsum("bhts,bhtd->bhsd", dsm, c["q"]) / np.sqrt(nh)
             # 合并多头 -> (B,T,3d)
@@ -212,8 +212,7 @@ class TinyTF:
             dz = dz1 + dz_in                                        # 残差
 
         # ---- 嵌入层
-        g["W_in"] = dz.reshape(-1, T * 0 + self.F) if False else \
-            dz.reshape(-1, d).T @ x.reshape(-1, self.F)
+        g["W_in"] = dz.reshape(-1, d).T @ x.reshape(-1, self.F)
         g["b_in"] = dz.sum((0, 1))
         g["pos"] = dz.sum(0)
         return g

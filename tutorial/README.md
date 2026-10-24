@@ -14,12 +14,36 @@
 | **视频①** | `out/t1_为什么长这样.mp4` | 2:07　RNN 的两个硬伤、检索视角、√d 的方差推导、因果掩码 |
 | **视频②** | `out/t2_前向与反向.mp4` | 2:25　结构框图、六行前向公式、softmax/LN 雅可比、注意力反传 |
 | **视频③** | `out/t3_两种实现.mp4` | 2:37　代码骨架、五个易错点、训练曲线重合、加载生产权重、注意力×倒立摆 |
+| **视频④** | `out/t4_前向逐算子.mp4` | 3:43　**9 个算子逐个讲**：公式 ↔ 源码 ↔ 真实数值（代码由源码实时切片）|
+| **视频⑤** | `out/t5_反向逐算子.mp4` | 3:54　**每个雅可比的推导 ↔ 对应代码**：tanh、LN、softmax、注意力、FFN、残差、验证 |
 | **numpy 实现** | `code/tinytf_numpy.py` | 前向 40 行 + 手写反向 80 行 + AdamW，无任何自动微分 |
 | **torch 实现** | `code/tinytf_torch.py` | 等价结构，含权重互转（`state_from_numpy` / `numpy_from_state`）|
 | **对齐检验** | `code/parity_test.py` | 与 autograd、中心差分双重验证 |
 | **训练对比** | `code/train_demo.py` | 同初始化同数据，双实现同步训练 |
 | **加载预训练** | `code/load_pretrained.py` | 生产权重装进 numpy 版：一致性、闭环、注意力 |
 | **插图** | `code/make_figs.py` | 损失曲线、梯度量级 |
+
+## 第四、五集：公式与代码逐行对应
+
+这两集把 9 个算子拆开讲，每一屏都是「左边公式、右边源码、底部真实数值」，
+其中源码是用锚点**从 `tinytf_numpy.py` 实时切出来**的（不是手抄），所以屏幕上看到的就是真正在跑的代码。
+
+| 集 | 算子 | 公式 | 对应代码 |
+|---|---|---|---|
+| ④ | ① 嵌入+位置编码 | $z=xW^T+b+\mathrm{pos}$ | `z = x @ W_in.T + b_in + pos` |
+| ④ | ② LayerNorm | $\hat z=(z-\mu)/\sigma$ | `ln_forward()` 7 行 |
+| ④ | ③ QKV 投影+分头 | $[Q;K;V]=hW^T+b$ | reshape + transpose |
+| ④ | ④ 缩放点积+掩码 | $s=qk^T/\sqrt{d_h}+M$ | `einsum` + `triu` |
+| ④ | ⑤ softmax | $a=e^{s-m}/\sum e^{s-m}$ | `softmax()` 4 行 |
+| ④ | ⑥ 加权求和+投影 | $y=(av)W_o^T$ | `einsum` + reshape |
+| ④ | ⑦⑧ 残差+FFN+GELU | $z\leftarrow z+W_2\mathrm{GELU}(W_1h)$ | `fc1/gelu/fc2` |
+| ④ | ⑨ 头+tanh | $u=12\tanh(w^Tz_T)$ | `head` + `tanh` |
+| ⑤ | 输出层 | $\bar r=\bar u\cdot12(1-\tanh^2 r)$ | `dr = du * u_max * (1-tanh²)` |
+| ⑤ | LayerNorm 反向 | $\partial z=\frac{\gamma}{\sigma}(g-\bar g-\hat z\overline{g\hat z})$ | `ln_backward()` 10 行 |
+| ⑤ | softmax 反向 | $\partial s_j=a_j(g_j-\sum a_ig_i)$ | 一行 `dsm` |
+| ⑤ | 注意力反向 | $\bar V=A^T\bar Y,\ \bar A=\bar YV^T$ 等 5 式 | 7 行 `einsum` |
+| ⑤ | FFN 反向 | $\partial W_2=z^Ta$（**不是** $\bar a^Ta$）| `dz.T @ act` |
+| ⑤ | 残差/嵌入 | $\bar z=\bar z_{out}(I+\partial f/\partial z)$ | `dz` 累加 + `pos.sum(0)` |
 
 ## 快速验证（三分钟）
 
