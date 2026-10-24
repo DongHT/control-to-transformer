@@ -16,6 +16,7 @@
 | **视频③** | `out/t3_两种实现.mp4` | 2:37　代码骨架、五个易错点、训练曲线重合、加载生产权重、注意力×倒立摆 |
 | **视频④** | `out/t4_前向逐算子.mp4` | 3:43　**9 个算子逐个讲**：公式 ↔ 源码 ↔ 真实数值（代码由源码实时切片）|
 | **视频⑤** | `out/t5_反向逐算子.mp4` | 3:54　**每个雅可比的推导 ↔ 对应代码**：tanh、LN、softmax、注意力、FFN、残差、验证 |
+| **视频⑥** | `out/t6_串起来.mp4` | 3:22　**全链路**：一次迭代 → 训练循环 → 参数更新 → int8 部署 → 闭环应用 |
 | **numpy 实现** | `code/tinytf_numpy.py` | 前向 40 行 + 手写反向 80 行 + AdamW，无任何自动微分 |
 | **torch 实现** | `code/tinytf_torch.py` | 等价结构，含权重互转（`state_from_numpy` / `numpy_from_state`）|
 | **对齐检验** | `code/parity_test.py` | 与 autograd、中心差分双重验证 |
@@ -44,6 +45,24 @@
 | ⑤ | 注意力反向 | $\bar V=A^T\bar Y,\ \bar A=\bar YV^T$ 等 5 式 | 7 行 `einsum` |
 | ⑤ | FFN 反向 | $\partial W_2=z^Ta$（**不是** $\bar a^Ta$）| `dz.T @ act` |
 | ⑤ | 残差/嵌入 | $\bar z=\bar z_{out}(I+\partial f/\partial z)$ | `dz` 累加 + `pos.sum(0)` |
+
+## 第六集：把算子串起来
+
+前面两集拆到算子，这一集把它们接成一条完整的流水线：
+
+| 段落 | 内容 | 屏幕上的可视化 |
+|---|---|---|
+| 一次迭代 | 前向 9 算子 → 损失 → 反向 9 算子 → AdamW | 两条管道（正向/逆向），一个小方块随时间在管道上移动 |
+| 前向 | $x\to z\to h\to qkv\to a\to y\to u$ | 6 段流水线 + 7 个张量形状 |
+| 反向 | $\partial u\to\partial r\to\partial z\to\partial S\to\partial Q,K\to\partial W$ | 同一管道逆流，7 个梯度表达式 |
+| 训练 | epoch → mini-batch → step | 高亮逐行跳动的训练循环代码（3,264 步） |
+| 更新 | $m_t,v_t,\theta_t$ | AdamW 五⼀行代码 + 为什么不衰减 LN 参数 |
+| 部署 | 逐张量 int8 | 量化公式 + 代码 + 71 KB→16.6 KB / 0.14 N / 0.32 ms |
+| 应用 | 传感器→窗口→模型→力→小车→传感器 | 闭环框图 + 实时倒立摆（50 Hz，30/30） |
+
+代码块采用 **VS Code Dark+ 配色**：关键字 `#569CD6`、流程控制 `#C586C0`、函数名 `#DCDCAA`、
+参数 `#9CDCFE`、字符串 `#CE9178`、数字 `#B5CEA8`、注释 `#6A9955`，
+并带"当前行"底纹，跟着旁白逐行高亮。
 
 ## 快速验证（三分钟）
 

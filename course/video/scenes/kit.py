@@ -107,25 +107,117 @@ def basin_image(data, w, h, ss=2):
 MENLO = "/System/Library/Fonts/Menlo.ttc"
 
 
-def code(cv, x, y, lines, size=15, color=(70, 84, 100), hl=None, hl_color=None,
-         lh=None, alpha=1.0, tag="code"):
-    """等宽代码块：逐字符选字体（ASCII→Menlo，其它→宋体），保证不会有方框。"""
+import re as _re
+
+# ---- VS Code Dark+ 配色（本题画面是深色底 #0A0F18）
+VS = {"kw": (86, 156, 214),      # #569CD6 关键字
+      "ctrl": (197, 134, 192),   # #C586C0 流程控制
+      "str": (206, 145, 120),    # #CE9178 字符串
+      "num": (181, 206, 168),    # #B5CEA8 数字
+      "com": (106, 153, 85),     # #6A9955 注释
+      "fn": (220, 220, 170),     # #DCDCAA 函数名
+      "self": (156, 220, 254),   # #9CDCFE self / 参数
+      "id": (212, 212, 212),     # #D4D4D4 普通标识符
+      "op": (212, 212, 212)}
+
+_TOK = _re.compile(r"""
+    (?P<com>\#.*$)
+  | (?P<str>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')
+  | (?P<num>\b\d+\.?\d*(?:[eE][+-]?\d+)?\b)
+  | (?P<name>[A-Za-z_]\w*)
+  | (?P<space>\s+)
+  | (?P<other>.)
+""", _re.VERBOSE)
+
+_KW = {"def", "class", "import", "from", "as", "lambda", "global", "nonlocal"}
+_CTRL = {"return", "if", "elif", "else", "for", "in", "while", "with", "try",
+         "except", "finally", "raise", "pass", "break", "continue", "yield",
+         "assert", "not", "and", "or", "is", "del", "None", "True", "False"}
+
+
+def py_tokens(line):
+    """把一行 Python 拆成 [(text, kind)]；kind ∈ kw/ctrl/str/num/com/fn/self/id/op
+
+    额外做两件事，让它更像 VS Code 的语义着色：
+    · def foo(a, b) 里的形参 → 参数色
+    · for x in ... 里的循环变量 → 参数色
+    """
+    out = []
+    toks = list(_TOK.finditer(line))
+    is_def = bool(_re.match(r"\s*(def|class)\s", line))
+    in_params = False
+    for_await = False
+    for i, m in enumerate(toks):
+        kind = m.lastgroup
+        txt = m.group(0)
+        if kind == "name":
+            if txt in _KW:
+                kind = "kw"
+            elif txt in _CTRL:
+                kind = "ctrl"
+            elif txt == "self":
+                kind = "self"
+            else:
+                nxt = ""
+                for m2 in toks[i + 1:]:
+                    if m2.lastgroup != "space":
+                        nxt = m2.group(0)
+                        break
+                prev = ""
+                for m2 in reversed(toks[:i]):
+                    if m2.lastgroup != "space":
+                        prev = m2.group(0)
+                        break
+                if nxt == "(":
+                    kind = "fn"
+                elif (is_def and in_params) or (prev == "for") or for_await:
+                    kind = "self"
+                    for_await = False
+                else:
+                    kind = "id"
+        elif kind == "other":
+            kind = "op"
+            if txt == "(" and is_def:
+                in_params = True
+            elif txt == ")" and in_params:
+                in_params = False
+        elif kind == "space":
+            kind = "id"
+        if txt == "for":
+            for_await = True
+        out.append((txt, kind))
+    return out
+
+
+def code(cv, x, y, lines, size=15, color=None, hl=None, hl_color=None,
+         lh=None, alpha=1.0, tag="code", lang="python", active=None):
+    """语法高亮的等宽代码块（VS Code Light+ 配色）。
+
+    lang="python" 时按 token 上色；lang=None 时用单色 color。
+    active: 当前讲解行（画一条浅色底纹）。
+    """
     menlo = ImageFont.truetype(MENLO, int(round(size * cv.ss)), index=0)
     song = ImageFont.truetype("/System/Library/Fonts/Songti.ttc", int(round(size * cv.ss)), index=6)
     d = ImageDraw.Draw(cv.img)
     lh = lh or size * 1.55
     hl = hl or set()
     hl_color = hl_color or (200, 130, 20)
+    base = color or (31, 31, 31)
     wmax = 0.0
     for i, ln in enumerate(lines):
-        c = hl_color if i in hl else color
-        col = (c[0], c[1], c[2], int(255 * alpha))
-        cx = x * cv.ss
         yy = (y + i * lh) * cv.ss
-        for ch in ln:
-            f = menlo if ord(ch) < 128 else song
-            d.text((cx, yy), ch, font=f, fill=col)
-            cx += f.getlength(ch)
+        if active is not None and i == active:
+            d.rectangle([(x - 6) * cv.ss, yy - 3 * cv.ss,
+                         (x + 560) * cv.ss, yy + (lh - 2) * cv.ss],
+                        fill=(30, 41, 56, int(255 * alpha)))
+        cx = x * cv.ss
+        toks = py_tokens(ln) if lang == "python" else [(ln, "id")]
+        for txt, kind in toks:
+            c = VS.get(kind, base) if lang == "python" else (hl_color if i in hl else base)
+            for ch in txt:
+                f = menlo if ord(ch) < 128 else song
+                d.text((cx, yy), ch, font=f, fill=(c[0], c[1], c[2], int(255 * alpha)))
+                cx += f.getlength(ch)
         wmax = max(wmax, cx / cv.ss - x)
     h = len(lines) * lh
     cv.boxes.append((x, y - size * 0.9, x + wmax, y - size * 0.9 + h, tag))
