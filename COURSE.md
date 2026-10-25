@@ -28,10 +28,14 @@
 
 ### ① 想看文字
 
-只编一个文件，得到全部内容（三篇 + 附录，**97 页**）：
+**不想编译**：直接下载编译好的 PDF（97 页）——
+[https://github.com/DongHT/control-to-transformer/releases/tag/v1.0](https://github.com/DongHT/control-to-transformer/releases/tag/v1.0)
+
+**想自己编**（三篇 + 附录，97 页）：
 
 ```bash
 cd book && xelatex main.tex && xelatex main.tex && open main.pdf
+# 没有 TeX？用 tectonic：./tectonic -X compile main.tex
 ```
 
 | 想看的范围 | 直接读源文件 |

@@ -3,11 +3,13 @@
 一部可以逐行验证的完整教程：同一台小车倒立摆，用**经典非线性控制**、**模仿学习与强化学习**、
 以及**从零手写的 Transformer** 各做一遍。三篇、97 页、20 集视频。
 
+> **📕 合订本 PDF（97 页）：[Releases v1.0](https://github.com/DongHT/control-to-transformer/releases/tag/v1.0)** · 直接下载：[`inverted-pendulum-to-transformer-v1.0.pdf`](https://github.com/DongHT/control-to-transformer/releases/download/v1.0/inverted-pendulum-to-transformer-v1.0.pdf)
+>
 > **→ 从这里开始：[`COURSE.md`](COURSE.md)**（学习路径、章节表、五个可验证数字）
 
 | 产物 | 位置 |
 |---|---|
-| 合订本讲义（三篇 + 附录） | [`book/main.tex`](book/main.tex)　·　**已编译 PDF：[`book/main.pdf`](book/main.pdf)（97 页）** |
+| 合订本讲义（三篇 + 附录） | [`book/main.tex`](book/main.tex)　·　**PDF 在 [Releases](https://github.com/DongHT/control-to-transformer/releases/tag/v1.0)（97 页）** |
 | 课程讲义源（第 1–10 讲 + 附录 A） | [`course/latex/`](course/latex/) |
 | Transformer 教程源（第 11–17 集） | [`tutorial/`](tutorial/) |
 | 视频 18 集（约 40 分钟） | `course/out/`、`tutorial/out/` |

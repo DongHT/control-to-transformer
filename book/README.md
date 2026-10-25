@@ -36,7 +36,8 @@ tar xzf tectonic.tar.gz
 ./tectonic -X compile main.tex      # 直接出 main.pdf
 ```
 
-本仓库已附带编译好的 **`main.pdf`（97 页）**，不装 TeX 也能直接读。
+编译好的 PDF 放在 GitHub Releases，不占仓库体积：
+**[Releases v1.0](https://github.com/DongHT/control-to-transformer/releases/tag/v1.0)**
 
 图片通过 `\graphicspath` 从 `../course/latex/` 与 `../tutorial/out/` 取，不需要拷贝。
 首次编译会下载约 200 MB 的宏包缓存（在 `~/Library/Caches/Tectonic`），之后离线可编。
