@@ -228,7 +228,7 @@ def s2(cv, t, dur):
     cv.text(90, 596, "阻尼：b_c = 0.12 N·s/m（导轨）　b_p = 0.004 N·m·s（转轴）", size=15,
             color=FAINT, alpha=a2)
     a3 = appear(t, 5.6, 0.8)
-    cv.text(90, 640, "状态 x = (p, θ, v, ω)，v = ṗ，ω = θ̇；参数取值见下一页", size=17,
+    cv.text(90, 640, "状态 x = (p, θ, v, ω)，其中 v = dp/dt，ω = dθ/dt；参数取值见下一页", size=17,
             color=DIM, alpha=a3)
 
 
