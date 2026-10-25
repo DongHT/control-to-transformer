@@ -149,7 +149,8 @@ class Canvas:
         ss = self.ss
         parts = parse_runs(s, size * ss, weight)      # widths in device px
         total = sum(p[1] for p in parts) / ss          # design px
-        if anchor[0] == "c":
+        # 约定：第一个字符是水平（l/m/r 或 c=居中），第二个是垂直（s 基线 / c 居中）
+        if anchor[0] in ("c", "m"):
             cx = x - total / 2
         elif anchor[0] == "r":
             cx = x - total
@@ -482,9 +483,14 @@ def build(video_spec, out_mp4, work="tmp_video", voice="Tingting", rate=178,
     if m > 0:
         speech /= m
         speech *= 0.92
-    bed = bgm(total + 1.0)
-    bed = bed[:len(speech)]
-    duck = duck_env(mask)
+    # 三条轨严格对齐到同一长度（bgm/ducking 可能因取整差 1 个采样点）
+    n = len(speech)
+    def _fit(a):
+        if len(a) >= n:
+            return a[:n]
+        return np.pad(a, (0, n - len(a)))
+    bed = _fit(bgm(total + 1.0))
+    duck = _fit(duck_env(mask))
     gain = 0.62 - 0.26 * duck
     mixdown = speech * 0.95 + bed * gain
     # gentle limiter + fades
@@ -526,6 +532,7 @@ def build(video_spec, out_mp4, work="tmp_video", voice="Tingting", rate=178,
                (si == len(shots) - 1 and tt >= sh["_start"]):
                 local = tt - sh["_start"]
                 active = sh
+                cv.now = local
                 sh["draw"](cv, local, sh["_dur"])
                 break
         if active is not None:

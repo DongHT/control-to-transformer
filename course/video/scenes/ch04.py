@@ -132,13 +132,15 @@ def s5(cv, t, dur):
         good = r["t_up"] < 15
         hit = r["p_max"] > 2.4
         col = GR if (good and not hit) else (MG if hit else DIM)
+        if abs(r["kE"] - 6.0) < 0.01:
+            # 先画底纹，再画文字，否则会把这一行的数字盖掉
+            cv.rect(96, y - 26, 660, y + 12, CY, width=1.2, alpha=0.7 * aa,
+                    fill_alpha=0.22 * aa, radius=6)
         cv.text(110, y, f"{r['kE']:.1f}", size=22, color=INK, alpha=aa)
         cv.text(230, y, (f"{r['t_up']:.2f} s" if good else "> 15 s"), size=22, color=col, alpha=aa)
         cv.text(520, y, f"{r['p_max']:.2f} m", size=22, color=(MG if hit else INK), alpha=aa)
         if abs(r["kE"] - 6.0) < 0.01:
-            cv.rect(96, y - 26, 660, y + 12, CY, width=1.2, alpha=0.7 * aa,
-                    fill_alpha=0.07 * aa, radius=6)
-            cv.text(806, y, "← 本课选择", size=18, color=CY, alpha=aa, anchor="ra")
+            cv.text(806, y, "← 本课选", size=18, color=CY, alpha=aa, anchor="ra")
 
     a2 = appear(t, 3.4, 0.8)
     cv.text(836, 300, "太小：泵不动", size=21, color=DIM, alpha=a2)

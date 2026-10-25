@@ -220,3 +220,23 @@ SHOTS = [
         "这才叫实现正确：不是能跑，而是与 autograd 逐位一致。",
     ], draw=s6, min_dur=16.0),
 ]
+
+
+# ---------- 统一风格的小结镜头（后补，与其他讲保持一致） ----------
+def s_summary(cv, t, dur):
+    title(cv, "本讲小结")
+    for i, (k, v) in enumerate([('结构', '2 层 Pre-LN 解码器，21 个算子'), ('前向', '六行公式，每行都能单独测'), ('反向', 'softmax / LayerNorm 雅可比 + 残差直通'), ('对齐', '31 个参数张量，梯度差 3.0e-14'), ('验证', '中心差分独立复核，相对误差 1e-11')]):
+        aa = appear(t, 0.5 + 0.62 * i, 0.55)
+        if aa <= 0:
+            continue
+        y = 196 + i * 62
+        cv.circle(104, y - 8, 7, CY, width=1.6, alpha=aa, fill_alpha=0.15 * aa)
+        cv.line((100, y - 8), (103, y - 5), CY, width=1.6, alpha=aa)
+        cv.line((103, y - 5), (109, y - 12), CY, width=1.6, alpha=aa)
+        cv.text(130, y, k, size=23, color=CY, alpha=aa, weight="bold")
+        cv.text(310, y, v, size=21, color=INK, alpha=aa)
+    a = appear(t, 4.4, 0.8)
+    cv.text(130, 580, '下一集：两份实现（numpy 手写反向 与 torch autograd）', size=24, color=AM, alpha=a)
+
+
+SHOTS.append(dict(name="summary", say=["本集小结。", "结构是两层的 Pre-LN 解码器，一共 21 个算子。", "前向是六行公式，每一行都能单独做单元测试。", "反向的关键是两个雅可比：softmax 减基线，LayerNorm 正交于平移与缩放。", "实测与 autograd 的梯度差 3 乘 10 的负 14 次方，另用中心差分独立复核。", "下一集，我们把它写成两份可以真正运行的程序。"], draw=s_summary, min_dur=14.0))

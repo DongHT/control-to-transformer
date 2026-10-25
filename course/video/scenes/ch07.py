@@ -229,7 +229,7 @@ SHOTS = [
         "现在解释最重要的现象：为什么拟合得很好，闭环却会跑偏。",
         {"say": "闭环误差满足一个指数放大：$\epsilon$ 乘上 $(e^{Lt}-1)/L$，本课的 $L$ 约等于 $4$。",
          "tts": "闭环误差满足一个指数放大：epsilon 乘上 e 的 L t 次方减一，再除以 L；本课的 L 约等于四。"},
-        "于是理论上行为克隆是 T 平方，DAgger 是 T。",
+        "于是理论上行为克隆（BC，Behavior Cloning）的代价按 T 平方涨，而 DAgger（Dataset Aggregation，数据集聚合）只按 T 涨。",
     ], draw=s5, min_dur=19.0),
     dict(name="curves", say=[
         "用本用例的 3 条曲线验证。",

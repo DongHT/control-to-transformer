@@ -83,7 +83,7 @@ def _pair_cross(A, B, step=2):
     return False
 
 
-def _trim(pts, th_stop=0.25, w_stop=0.8):
+def _trim(pts, th_stop=0.02, w_stop=0.05):
     """stop drawing before all trajectories collapse onto the origin."""
     for i, (th, w) in enumerate(pts):
         if abs(th) < th_stop and abs(w) < w_stop:
@@ -120,17 +120,14 @@ def _pick():
                 ok = True
                 for i2 in range(n):
                     for m in range(i2 + 1, n):
+                        # 两条收敛轨迹最终都会汇到原点，这一对不要求“不相交”
+                        if i2 < len(gs) and m < len(gs):
+                            continue
                         if _pair_cross(cands[i2][1], cands[m][1]):
                             ok = False
                             break
                     if not ok:
                         break
-                if ok and len(cands) == 4:
-                    # the two converging curves must end visibly apart, not merge
-                    d = ((cands[0][1][-1][0] - cands[1][1][-1][0]) ** 2
-                         + (cands[0][1][-1][1] - cands[1][1][-1][1]) ** 2) ** 0.5
-                    if d < 0.35:
-                        continue
                 if ok:
                     score = sum(len(c[1]) for c in cands)
                     if best is None or score > best[0]:
@@ -460,7 +457,7 @@ SHOTS = [
         {"say": "第一，线性化这张地图只在 $\\pm0.2$ 弧度内可信，$1$ 秒后误差就到 $35\\%$。",
          "tts": "第一，线性化这张地图只在正负零点二弧度内可信，一秒后误差就到百分之三十五。"},
         {"say": "第二，$K_\\theta$ 乘上大角度会给出 $190$ 多牛顿的需求，但执行器只有 $12$ 牛顿。",
-         "tts": "第二，K 西塔乘上大角度会给出 $190$ 多牛顿的需求，但执行器只有十二牛顿。"},
+         "tts": "第二，K 西塔乘上大角度会给出 190 多牛顿的需求，但执行器只有十二牛顿。"},
         "在饱和的世界里，加增益不解决问题。",
     ], draw=s7, min_dur=20.0),
     dict(name="summary", say=[

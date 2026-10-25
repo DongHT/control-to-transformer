@@ -45,7 +45,7 @@ def s2(cv, t, dur):
     math_(cv, 120, 302, r"\quad -b_c\dot p + m_p l\sin\theta\,\dot\theta^2", 19, INK)
     math_(cv, 120, 332, r"\quad +b_p\cos\theta\,\dot\theta - m_p g\sin\theta\cos\theta", 19, INK)
     cv.text(120, 390, "摩擦 / 科氏 / 重力耦合全混在一起", size=19, color=DIM, alpha=a)
-    cv.text(120, 424, "每换一次控制律就得重推一遍", size=19, color=DIM, alpha=a)
+    cv.text(120, 424, "每换一次控制律就得再推一遍", size=19, color=DIM, alpha=a)
 
     a2 = appear(t, 2.0, 0.8)
     cv.arrow((596, 326), (652, 326), CY, width=2.4, alpha=a2)
@@ -57,7 +57,7 @@ def s2(cv, t, dur):
     math_(cv, 712, 268, r"\ddot p = v", 26, INK)
     math_(cv, 712, 330, r"\ddot\theta=\frac{g\sin\theta-v\cos\theta}{l}"
                         r"-\frac{b_p\dot\theta}{m_p l^2}", 22, INK)
-    cv.text(712, 420, "小车通道变成二重积分器", size=19, color=DIM, alpha=a3)
+    cv.text(712, 420, "小车通道变成二次积分器", size=19, color=DIM, alpha=a3)
     cv.text(712, 454, "摆杆通道只留下一个非线性方程", size=19, color=DIM, alpha=a3)
 
 
@@ -92,7 +92,7 @@ def s4(cv, t, dur):
     cv.rect(96, 186, 620, 330, CY, width=1.4, alpha=0.8 * a, fill_alpha=0.06 * a, radius=8)
     cv.text(120, 218, "小车通道（线性）", size=22, color=CY, alpha=a)
     math_(cv, 120, 276, r"\ddot p=v", 30, INK)
-    cv.text(400, 268, "二重积分器", size=19, color=DIM, alpha=a)
+    cv.text(400, 268, "二次积分器", size=19, color=DIM, alpha=a)
 
     a2 = appear(t, 2.0, 0.8)
     cv.rect(96, 372, 760, 520, AM, width=1.4, alpha=0.8 * a2, fill_alpha=0.06 * a2, radius=8)
@@ -163,8 +163,8 @@ SHOTS = [
     ], draw=s1, min_dur=11.0),
     dict(name="why", say=[
         "看同一台机器的两种写法。",
-        "力域里，摩擦、科氏项、重力耦合全都混在一个方程里，换一个控制律就要重推一遍。",
-        "加速度域里，小车通道直接变成二重积分器，摆杆通道只剩下一个非线性方程。",
+        "力域里，摩擦、科氏项、重力耦合全都混在一个方程里，换一个控制律就要再推一遍。",
+        "加速度域里，小车通道直接变成二次积分器，摆杆通道只剩下一个非线性方程。",
     ], draw=s2, min_dur=17.0),
     dict(name="inverse", say=[
         "反解就是一句话：把指定的加速度翻译成需要的力。",
@@ -175,7 +175,7 @@ SHOTS = [
     ], draw=s3, min_dur=17.0),
     dict(name="after", say=[
         "换完之后系统被拆成两层。",
-        "外层看到的是小车通道的二重积分器，这是最好对付的对象。",
+        "外层看到的是小车通道的二次积分器，这是最好对付的对象。",
         "摆杆通道保留全部非线性，但只剩下重力项和加速度指令的耦合。",
         "能量法和滑模法，从此都只需要对付这一个方程。",
     ], draw=s4, min_dur=16.0),

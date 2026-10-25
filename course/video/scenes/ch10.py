@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from kit import math_, math_w, title, chip, axes, cartpole, curvy
+from kit import big_title, math_, math_w, title, chip, axes, cartpole, curvy
 from render import (Canvas, INK, DIM, FAINT, CY, AM, MG, BL, GR, BG,
                     appear, smooth, lerp, W, H)
 
@@ -16,8 +16,7 @@ from render import (Canvas, INK, DIM, FAINT, CY, AM, MG, BL, GR, BG,
 def s1(cv, t, dur):
     cv.text(640, 252, "倒立摆控制　·　从拉格朗日到 Transformer", size=25, color=CY, anchor="ma",
             alpha=appear(t, 0.2, 0.9))
-    cv.text(640, 352, "第 10 讲　策略梯度与 PPO", size=56, color=INK, anchor="ma", weight="bold",
-            alpha=appear(t, 0.9, 0.9))
+    big_title(cv, "第 10 讲　策略梯度与 PPO", 352, 56, INK, appear(t, 0.9, 0.9))
     cv.text(640, 414, "从 MDP 到域随机化", size=31, color=DIM, anchor="ma", alpha=appear(t, 1.7, 0.9))
     cv.line((500, 450), (780, 450), CY, width=2, alpha=0.5 * appear(t, 2.3, 0.8))
     if appear(t, 2.6, 0.9) > 0:
@@ -225,7 +224,7 @@ SHOTS = [
          "tts": "本课用高斯策略，并且从行为克隆的权重热启动——因为策略梯度只是局部搜索。"},
     ], draw=s2, min_dur=19.0),
     dict(name="ppo", say=[
-        "PPO 的核心是一个裁剪的重要性比率。",
+        "PPO（Proximal Policy Optimization，近端策略优化）的核心是一个裁剪的重要性比率。",
         "比率是“新策略动作概率除以旧策略”，它偏离一太远，估计就失效。",
         {"say": "clip 把它截在 $0.8$ 到 $1.2$：好动作涨到上限就停，坏动作跌到下限就停。",
          "tts": "clip 把它截在零点八到一点二：好动作涨到上限就停，坏动作跌到下限就停。"},

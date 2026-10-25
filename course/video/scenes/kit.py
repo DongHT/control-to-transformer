@@ -14,9 +14,19 @@ SCALE = 190.0
 RAIL = 1.4
 
 
-def math_(cv, x, y, tex, size=26, color=INK, anchor="ls", check=True, tag=None):
+MATH_DELAY = 0.30      # 公式出现比镜头起点晚 0.30 s
+MATH_FADE = 0.55       # 淡入时长
+
+
+def math_(cv, x, y, tex, size=26, color=INK, anchor="ls", check=True, tag=None, alpha=None):
+    """alpha 缺省时按镜头内时间自动淡入（与文字同步，不会“公式早早出现”）。"""
+    if alpha is None:
+        now = getattr(cv, "now", 0.0)
+        alpha = min(1.0, max(0.0, (now - MATH_DELAY) / MATH_FADE))
+        if alpha <= 0.02:
+            return (x, y, x, y)
     box = mr.paste(cv, x, y, tex, size=size, color="#%02x%02x%02x" % color,
-                   anchor=anchor, ss=cv.ss)
+                   anchor=anchor, ss=cv.ss, alpha=alpha)
     if check:
         cv.boxes.append((box[0], box[1], box[2], box[3], tag or tex[:16]))
     return box
@@ -27,10 +37,21 @@ def math_w(tex, size):
 
 
 def title(cv, text, sub=None):
-    cv.text(90, 86, text, size=40, color=INK, weight="bold")
+    size = 40
+    while size > 26 and cv.text_w(text, size) > 1150:   # 右边界 1280 - 90 - 40
+        size -= 2
+    cv.text(90, 86, text, size=size, color=INK, weight="bold")
     cv.line((90, 108), (150, 108), CY, width=4)
     if sub:
         cv.text(90, 138, sub, size=21, color=FAINT)
+
+
+def big_title(cv, text, y, size=60, color=INK, alpha=1.0):
+    """封面主标题：自动缩小字号以适配左右边界（90..1190）。"""
+    while size > 30 and cv.text_w(text, size) > 1100:
+        size -= 2
+    cv.text(640, y, text, size=size, color=color, anchor="ma", weight="bold", alpha=alpha)
+    return size
 
 
 def chip(cv, x, y, text, color, a=1.0, size=21):

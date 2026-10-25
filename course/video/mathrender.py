@@ -107,13 +107,16 @@ def baseline_of(tex, size, color="#EAF2F8"):
         return 0.72
 
 
-def paste(canvas, x, y, tex, size=40, color="#EAF2F8", anchor="ls", ss=2, baseline=0.72):
+def paste(canvas, x, y, tex, size=40, color="#EAF2F8", anchor="ls", ss=2, baseline=0.72, alpha=1.0):
     """Paste a formula onto the supersampled canvas.
 
     anchor: 'ls' = left baseline, 'ms' = middle baseline, 'rs' = right baseline,
             'lc'/'mc'/'rc' = vertical centre instead of baseline.
     """
     img = render(tex, size * ss, color)
+    if alpha < 0.999:
+        a = img.getchannel("A").point(lambda v: int(v * max(0.0, alpha)))
+        img.putalpha(a)
     w = img.width
     dy = int(img.height * baseline_of(tex, size * ss, color))
     if anchor[0] == "c":

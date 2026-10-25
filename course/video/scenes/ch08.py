@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from kit import math_, math_w, title, chip, axes, cartpole, curvy
+from kit import big_title, math_, math_w, title, chip, axes, cartpole, curvy
 from render import (Canvas, INK, DIM, FAINT, CY, AM, MG, BL, GR, BG,
                     appear, smooth, lerp, W, H)
 
@@ -16,8 +16,7 @@ from render import (Canvas, INK, DIM, FAINT, CY, AM, MG, BL, GR, BG,
 def s1(cv, t, dur):
     cv.text(640, 252, "倒立摆控制　·　从拉格朗日到 Transformer", size=25, color=CY, anchor="ma",
             alpha=appear(t, 0.2, 0.9))
-    cv.text(640, 352, "第 8 讲　因果 Transformer", size=60, color=INK, anchor="ma", weight="bold",
-            alpha=appear(t, 0.9, 0.9))
+    big_title(cv, "第 8 讲　因果 Transformer", 352, 60, INK, appear(t, 0.9, 0.9))
     cv.text(640, 414, "从软检索推导到 int8 部署", size=31, color=DIM, anchor="ma", alpha=appear(t, 1.7, 0.9))
     cv.line((500, 450), (780, 450), CY, width=2, alpha=0.5 * appear(t, 2.3, 0.8))
     if appear(t, 2.6, 0.9) > 0:
@@ -232,3 +231,23 @@ SHOTS = [
         "所以它在摆起阶段估相位，在稳摆阶段估变化率。",
     ], draw=s7, min_dur=17.0),
 ]
+
+
+# ---------- 统一风格的小结镜头（后补，与其他讲保持一致） ----------
+def s_summary(cv, t, dur):
+    title(cv, "本讲小结")
+    for i, (k, v) in enumerate([('为什么序列', '相位藏在历史里，单帧看不出来'), ('因果掩码', '训练时也不许看未来，否则部署必错'), ('规模', '18,177 参数，int8 后 16.6 KB'), ('部署', '浏览器 0.32 ms/步，50 Hz 只占 1.6%'), ('注意力', '摆起看中段、稳摆锁最近步')]):
+        aa = appear(t, 0.5 + 0.62 * i, 0.55)
+        if aa <= 0:
+            continue
+        y = 196 + i * 62
+        cv.circle(104, y - 8, 7, CY, width=1.6, alpha=aa, fill_alpha=0.15 * aa)
+        cv.line((100, y - 8), (103, y - 5), CY, width=1.6, alpha=aa)
+        cv.line((103, y - 5), (109, y - 12), CY, width=1.6, alpha=aa)
+        cv.text(130, y, k, size=23, color=CY, alpha=aa, weight="bold")
+        cv.text(310, y, v, size=21, color=INK, alpha=aa)
+    a = appear(t, 4.4, 0.8)
+    cv.text(130, 580, '下一讲：把它从 0% 救到 100%（DAgger）', size=24, color=AM, alpha=a)
+
+
+SHOTS.append(dict(name="summary", say=["本讲小结。", "为什么必须是序列模型：相位信息藏在历史里，单帧看不出来。", "因果掩码必须训练时就加，否则学到的解在部署时不可用。", "规模只有 18,177 个参数，int8 量化后 16.6 KB，浏览器单步 0.32 毫秒。", "注意力在摆起阶段看窗口中段，在稳摆阶段锁到最近几步。", "下一讲，把这个 0% 成功率的策略救回到 100%。"], draw=s_summary, min_dur=14.0))

@@ -308,3 +308,23 @@ SHOTS = [
         "如果符号写错，偏差会是 0.01量级；转置写错，形状直接不匹配。",
     ], draw=s9, min_dur=19.0),
 ]
+
+
+# ---------- 统一风格的小结镜头（后补，与其他讲保持一致） ----------
+def s_summary(cv, t, dur):
+    title(cv, "本讲小结")
+    for i, (k, v) in enumerate([('起点', '损失对 u 的梯度，经 tanh 的导数往回走'), ('两个雅可比', 'softmax 减基线；LN 正交于平移与缩放'), ('注意力', 'V、A、S、Q、K 五个张量，七行 einsum'), ('一个坑', 'W₂ 的梯度用 dz，不是 dact'), ('验证', '与 autograd 差 3.0e-14，形状检查兜底')]):
+        aa = appear(t, 0.5 + 0.62 * i, 0.55)
+        if aa <= 0:
+            continue
+        y = 196 + i * 62
+        cv.circle(104, y - 8, 7, CY, width=1.6, alpha=aa, fill_alpha=0.15 * aa)
+        cv.line((100, y - 8), (103, y - 5), CY, width=1.6, alpha=aa)
+        cv.line((103, y - 5), (109, y - 12), CY, width=1.6, alpha=aa)
+        cv.text(130, y, k, size=23, color=CY, alpha=aa, weight="bold")
+        cv.text(310, y, v, size=21, color=INK, alpha=aa)
+    a = appear(t, 4.4, 0.8)
+    cv.text(130, 580, '下一集：把算子串成一次完整迭代（前向→损失→反向→更新）', size=24, color=AM, alpha=a)
+
+
+SHOTS.append(dict(name="summary", say=["本集小结。", "反向从输出层开始，经 tanh 的导数一路往回。", "两个关键雅可比：softmax 自带减基线，LayerNorm 正交于平移与缩放。", "注意力要算五个张量的梯度，代码是七行 einsum，形状错一个就不对。", "最容易踩的坑是 W2 的梯度：用残差主干 dz，不是激活值的梯度 dact。", "实测与 autograd 差 3 乘 10 的负 14 次方。下一集，把这一路串成一次完整迭代。"], draw=s_summary, min_dur=14.0))

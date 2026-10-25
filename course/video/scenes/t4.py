@@ -310,3 +310,23 @@ SHOTS = [
         "这 9 个算子串起来，就是一万八千一百七十七个参数的全部前向。",
     ], draw=s10, min_dur=17.0),
 ]
+
+
+# ---------- 统一风格的小结镜头（后补，与其他讲保持一致） ----------
+def s_summary(cv, t, dur):
+    title(cv, "本讲小结")
+    for i, (k, v) in enumerate([('9 个算子', '嵌入→LN→QKV→掩码→softmax→AV→投影→FFN→头'), ('实测数值', '‖z‖ = 2.67；LN 放大 2.12 倍'), ('注意力', '≈ 1/24，几乎在平均历史'), ('GELU', '64 个隐单元里 34 个被压掉'), ('输出', 'u = 4.153 N')]):
+        aa = appear(t, 0.5 + 0.62 * i, 0.55)
+        if aa <= 0:
+            continue
+        y = 196 + i * 62
+        cv.circle(104, y - 8, 7, CY, width=1.6, alpha=aa, fill_alpha=0.15 * aa)
+        cv.line((100, y - 8), (103, y - 5), CY, width=1.6, alpha=aa)
+        cv.line((103, y - 5), (109, y - 12), CY, width=1.6, alpha=aa)
+        cv.text(130, y, k, size=23, color=CY, alpha=aa, weight="bold")
+        cv.text(310, y, v, size=21, color=INK, alpha=aa)
+    a = appear(t, 4.4, 0.8)
+    cv.text(130, 580, '下一集：把每一步反过来算（反向逐算子）', size=24, color=AM, alpha=a)
+
+
+SHOTS.append(dict(name="summary", say=["本集小结。", "九个算子串成一条流水线，每个都给了公式、源码和真实数值。", "嵌入后范数 2.67；LayerNorm 因为方差只有 0.223，把信号放大了 2.12 倍。", "注意力前六个位置都在 0.04 附近，几乎在平均历史。", "前馈 64 个隐单元里有 34 个被 GELU 压掉；最后输出 4.153 牛顿。", "下一集，把这一路原样反过来算一遍。"], draw=s_summary, min_dur=14.0))

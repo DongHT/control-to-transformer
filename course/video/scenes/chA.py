@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from kit import math_, math_w, title, chip, axes, cartpole, curvy
+from kit import big_title, math_, math_w, title, chip, axes, cartpole, curvy
 from render import (Canvas, INK, DIM, FAINT, CY, AM, MG, BL, GR, BG,
                     appear, smooth, lerp, W, H)
 
@@ -28,8 +28,7 @@ def box(cv, x0, y0, x1, y1, label, shape="", col=CY, a=1.0, size=17, shape_size=
 
 def s1(cv, t, dur):
     cv.text(640, 250, "倒立摆控制　·　课程附录", size=25, color=CY, anchor="ma", alpha=appear(t, 0.2, 0.9))
-    cv.text(640, 344, "附录 A　Transformer 内部机制", size=56, color=INK, anchor="ma",
-            weight="bold", alpha=appear(t, 0.9, 0.9))
+    big_title(cv, "附录 A　Transformer 内部机制", 344, 56, INK, appear(t, 0.9, 0.9))
     cv.text(640, 404, "前向逐步、反向逐层、注意力与运动对齐", size=30, color=DIM, anchor="ma",
             alpha=appear(t, 1.7, 0.9))
     cv.line((490, 442), (790, 442), CY, width=2, alpha=0.5 * appear(t, 2.3, 0.8))
