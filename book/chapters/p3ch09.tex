@@ -1,0 +1,119 @@
+\chapter{PPO：从原理到实现}
+\label{ch:ppo-impl}
+
+\begin{quote}\small
+本章把第 10 讲做成可运行的版本：MDP 形式化、策略梯度定理的三行推导、
+GAE 的偏差-方差折中、PPO（\textbf{P}roximal \textbf{P}olicy \textbf{O}ptimization，
+近端策略优化）的 clip 目标，以及七行核心更新的实测结果。
+\end{quote}
+
+\section{MDP}
+
+状态 $\mathcal{S}\subset\mathbb{R}^4$（用 24 步历史作观测），动作 $\mathcal{A}=[-12,12]$\,N，
+转移由第 1 讲的动力学给出，$\gamma=0.995$（有效视野 $\approx4$\,s）。目标
+\begin{equation}
+  J(\theta)=\mathbb{E}_{\tau\sim p_\theta}\Big[\sum_{t}\gamma^t r_t\Big].
+\end{equation}
+与模仿学习最大的差别：\textbf{这里没有“专家动作”，只有回报}。
+
+\section{策略梯度定理}
+
+$p_\theta$ 中只有 $\pi_\theta$ 依赖 $\theta$，于是
+\begin{align}
+  \nabla_\theta J
+  &=\int \nabla_\theta p_\theta(\tau)R(\tau)d\tau
+   =\int p_\theta(\tau)\,\nabla_\theta\log p_\theta(\tau)\,R(\tau)d\tau \notag\\
+  &=\mathbb{E}\Big[\sum_t\nabla_\theta\log\pi_\theta(a_t|s_t)\,A_t\Big],
+  \qquad A_t=R_t-\gamma V(s_{t+1}).
+\end{align}
+
+三个技巧各一行：
+\begin{enumerate}[leftmargin=1.6em,itemsep=2pt]
+  \item \textbf{对数似然}：$\nabla p_\theta=p_\theta\nabla\log p_\theta$，把“对分布求导”变成“对 log 求导”；
+  \item \textbf{因果性}：$t$ 时刻的动作不影响 $t$ 之前的奖励，所以求和从 $t$ 开始；
+  \item \textbf{基线}：减去 $\gamma V(s_{t+1})$ 不改变期望、只降方差。
+\end{enumerate}
+
+\keypoint{策略梯度是\textbf{局部搜索}，所以必须从行为克隆的权重热启动。
+随机初始化几乎学不会摆起——这不是实现问题，是方法本身的性质。}
+
+\section{GAE}
+
+\begin{equation}
+  \hat A_t^{\mathrm{GAE}(\lambda)}=\sum_{l\ge0}(\gamma\lambda)^l\delta_{t+l},
+  \qquad \delta_t=r_t+\gamma V(s_{t+1})-V(s_t).
+\end{equation}
+$\lambda=0$ 只用一步（方差小、偏差大）；$\lambda=1$ 用整条回报（无偏、方差大）。
+本课取 $\lambda=0.95$，因为价值函数也是同一个小网络估的，不够准。
+
+\section{PPO 的 clip 目标}
+
+重要性比率 $r_t(\theta)=\pi_\theta/\pi_{\theta_{\text{old}}}$ 偏离 1 太远时估计失效。
+PPO 用一阶近似——把比率裁到 $[0.8,1.2]$：
+\begin{equation}
+  L^{\mathrm{CLIP}}=\mathbb{E}\big[\min\big(r_tA_t,\ \mathrm{clip}(r_t,0.8,1.2)A_t\big)\big].
+\end{equation}
+$A_t>0$ 时 $r$ 涨到 $1.2$ 就截住；$A_t<0$ 时跌到 $0.8$ 就截住。$\min$ 保证
+\textbf{截断只在你“贪心过头”时生效}，等价于一个软信任域。
+
+\section{实现：七行核心}
+
+\begin{lstlisting}[caption={PPO 的核心更新（rl.py）}]
+mean  = pol(obs_t[b])
+std_  = pol.log_std.exp()
+logp  = -0.5 * ((act_t[b] - mean) / std_) ** 2 - pol.log_std - 0.5 * math.log(2 * math.pi)
+ratio = torch.exp(logp - oldlogp_t[b])
+s1 = ratio * adv_t[b]
+s2 = torch.clamp(ratio, 0.8, 1.2) * adv_t[b]
+loss = -torch.min(s1, s2).mean()
+\end{lstlisting}
+
+配套的奖励（每 20\,ms 一步）：
+\begin{equation}
+  r=\cos\theta-0.15p^2-0.5\Big(\frac{u}{12}\Big)^2+0.5\cdot\mathbf1\{|\theta|<0.1\}
+   -4\cdot\mathbf1\{\text{撞墙}\}.
+\end{equation}
+注意里面\textbf{没有“摆起时间”}：写物理量，不写指标。
+
+\subsection{优势标准化为什么重要}
+
+实现里做了 $\hat A\leftarrow(\hat A-\bar A)/\mathrm{std}(\hat A)$。
+不做的话，少数大幅值的样本会主导梯度，策略更新被单个回合带偏。
+这一步没有理论上的必要性，但工程上几乎是必须的。
+
+\section{实测}
+
+\begin{center}\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+策略 & 摆起 & 力 RMS & 力总变差 & 最大 $\Delta u$ & $+4$\,N 侧风 \\
+\midrule
+专家（能量+LQR） & $2.84$ & $2.42$ & $107$ & $10.05$ & $100\%$ \\
+Transformer（BC+DAgger） & $2.74$ & $2.39$ & $109$ & $5.36$ & $80\%$ \\
+RL & $\mathbf{2.22}$ & $\mathbf{2.06}$ & $\mathbf{65}$ & $3.89$ & $\mathbf{3\%}$ \\
+RL + DR & $2.31$ & $2.12$ & $70$ & $\mathbf{3.74}$ & $\mathbf{100\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+读法：摆起 $-22\%$、力 $-15\%$、力总变差 $-40\%$；最大单步跳变 $10.05\to3.74$\,N
+（硬切换被学成连续映射）。唯一输的是抗扰：$+4$\,N 侧风下只剩 $3\%$。
+
+\subsection{域随机化}
+
+\begin{equation}
+  \max_\pi\ \mathbb{E}_{\xi\sim\mathcal{U}}\ \mathbb{E}_{\tau\sim P_\xi}[R(\tau)],
+\end{equation}
+$\xi$ 是风的强度与时段。它是分布鲁棒优化的“平均版”：不追求最坏情况，
+而是让策略在一族环境上都不错。本课 $3\%\to100\%$，代价是摆起慢 $0.09$\,s。
+
+\keypoint{鲁棒性是\textbf{分布}的性质，不是参数的性质。
+训练里没有恒力，位置误差几乎不被惩罚，策略就学会了“车漂一点无所谓”。}
+
+\section{习题}
+\begin{enumerate}[leftmargin=1.6em,itemsep=4pt]
+  \item 去掉优势标准化，训练一次，比较收敛曲线与最终回报的方差。
+  \item 把 clip 从 $0.2$ 改成 $0.05$ 与 $0.5$，观察“更新次数—回报”的关系。
+  \item 把 $\lambda$ 从 $0.95$ 改成 $0$ 与 $1$，比较收敛速度。
+  \item 设计一个“最坏情况”的 DR（固定 $5$\,N 恒风），与平均版比较保守程度。
+\end{enumerate}

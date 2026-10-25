@@ -18,6 +18,8 @@
 | **视频⑤** | `out/t5_反向逐算子.mp4` | 3:54　**每个雅可比的推导 ↔ 对应代码**：tanh、LN、softmax、注意力、FFN、残差、验证 |
 | **视频⑥** | `out/t6_串起来.mp4` | 3:22　**全链路**：一次迭代 → 训练循环 → 参数更新 → int8 部署 → 闭环应用 |
 | **视频⑦** | `out/t7_训练方法.mp4` | 3:37　**优化器**：SGD→Momentum→RMSProp→Adam→AdamW，二维病态曲面轨迹 + 真实模型对比 |
+| **视频⑧** | `out/t8_DAgger原理到实现.mp4` | 3:41　**DAgger**：分布漂移 → no-regret 归约 → 三个函数 → 0/30→30/30 |
+| **视频⑨** | `out/t9_PPO原理到实现.mp4` | 4:01　**PPO**：MDP → 策略梯度 → GAE → clip → 七行核心更新 → 域随机化 |
 | **numpy 实现** | `code/tinytf_numpy.py` | 前向 40 行 + 手写反向 80 行 + AdamW，无任何自动微分 |
 | **torch 实现** | `code/tinytf_torch.py` | 等价结构，含权重互转（`state_from_numpy` / `numpy_from_state`）|
 | **对齐检验** | `code/parity_test.py` | 与 autograd、中心差分双重验证 |

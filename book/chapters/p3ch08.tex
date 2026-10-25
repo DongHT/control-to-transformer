@@ -1,0 +1,112 @@
+\chapter{DAgger：从原理到实现}
+\label{ch:dagger-impl}
+
+\begin{quote}\small
+本章把第 9 讲的结论写成可执行的东西：为什么行为克隆会越走越偏、
+no-regret 归约如何把 $O(\epsilon T^2)$ 降成 $O(\epsilon T)$、
+以及 DAgger（\textbf{D}ataset \textbf{Agg}regation，数据集聚合）的三十行实现与实测。
+\end{quote}
+
+\section{问题的形式化}
+
+记专家的状态分布为 $d_{\pi^\star}$，策略的状态分布为 $d_{\pi_\theta}$。
+行为克隆最小化
+\begin{equation}
+  \epsilon_{\mathrm{BC}}=\mathbb{E}_{s\sim d_{\pi^\star}}
+  \big\|\pi_\theta(s)-\pi^\star(s)\big\|,
+\end{equation}
+而闭环里真正承受的是另一个期望：
+\begin{equation}
+  \epsilon_{\mathrm{test}}=\mathbb{E}_{s\sim d_{\pi_\theta}}
+  \big\|\pi_\theta(s)-\pi^\star(s)\big\|.
+  \label{eq:test2}
+\end{equation}
+式 \eqref{eq:test2} 的下标就是全部问题：\textbf{训练时看不到测试时会到达的状态}。
+
+\subsection{误差累积}
+
+设单步误差 $\le\epsilon$、闭环 Lyapunov 指数 $L$，则 $t$ 步后偏差
+$\lesssim\epsilon(e^{Lt}-1)/L$，沿时间求和给出
+\begin{equation}
+  J_{\mathrm{BC}}\le J^\star+O(\epsilon T^2),
+  \qquad
+  J_{\mathrm{DAgger}}\le J^\star+O(\epsilon T).
+\end{equation}
+本课实例：$T=600$ 步、$\epsilon\approx0.038$（归一化）。纯 BC 实测在
+$0.10$\,s 就越过 $0.15$\,rad，8\,s 末偏差 $0.652$\,rad；DAgger 版末偏差 $0.0016$\,rad。
+
+\section{算法}
+
+\begin{enumerate}[leftmargin=1.6em,itemsep=3pt]
+  \item 用当前策略 $\pi_{\theta_i}$ 跑闭环，允许探索噪声，记录它\textbf{实际到达}的状态 $\{\hat s_t\}$；
+  \item 请专家在这些状态上标注 $a^\star_t=\pi^\star(\hat s_t)$；
+  \item 并入数据集 $D_{i+1}=D_i\cup\{(\hat s_t,a^\star_t)\}$；
+  \item 在 $D_{i+1}$ 上重训，回到第 1 步。
+\end{enumerate}
+
+可选加固是 $\beta$ 混合：
+\begin{equation}
+  a=\beta\,a^\star+(1-\beta)\,\pi_\theta(s),\qquad \beta:1\to0,
+\end{equation}
+前几轮多一点专家动作，保证早期数据质量。
+
+\begin{quote}
+DAgger 的唯一成本：\textbf{专家必须能对任意状态标注}。本课专家是解析控制器，成本为零；
+若专家是人，这就是主要开销，也是 DAgger 在工业界不如 BC 常见的原因。
+\end{quote}
+
+\section{实现}
+
+三个函数就是全部。第一个负责“去陌生的地方”：
+
+\begin{lstlisting}[caption={rollout\_policy：带探索噪声的闭环}]
+for k in range(n):
+    u = ctl(x, k * DT)
+    a = float(np.clip(u + rng.normal(0, noise), -P["u_max"], P["u_max"]))
+    x = pl.rk4(x, a, DT)                 # 用带噪动作推进
+    if abs(x[0]) > P["x_max"]:           # 与真实导轨一致的钳位
+        x[0] = np.sign(x[0]) * P["x_max"]; x[2] = 0.0
+\end{lstlisting}
+
+第二个是 DAgger 的全部“魔法”——四行：
+
+\begin{lstlisting}[caption={relabel：专家在策略的状态上标注}]
+def relabel(X, expert):
+    expert.reset()
+    return np.array([expert(X[k], k * DT) for k in range(len(X))])
+\end{lstlisting}
+
+第三个是主循环：每轮收集 140 个回合、切窗后约 $26{,}460$ 个新样本，并与旧数据合并。
+
+\section{实测}
+
+\begin{center}\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+阶段 & 新增窗口 & 验证损失 & 闭环成功率 & 摆起时间 \\
+\midrule
+BC & -- & $1.45\times10^{-3}$ & $0/30$ & -- \\
+DAgger 1 & $26{,}460$ & $3.44\times10^{-3}$ & $30/30$ & $2.56$\,s \\
+DAgger 2 & $26{,}460$ & $3.38\times10^{-3}$ & $30/30$ & $2.68$\,s \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{一个反直觉的现象}
+
+\textbf{验证损失涨了 2.3 倍，闭环成功率从 0 变成 100\%。}
+
+原因是验证集仍是旧分布（专家状态），而新策略的分布更宽、更难拟合。
+换句话说：$\epsilon_{\mathrm{BC}}$ 在旧分布上确实变大了，但 $\epsilon_{\mathrm{test}}$
+——真正决定闭环表现的那个量——变小了。
+
+\keypoint{结论：数据驱动控制的验收指标只能是\textbf{闭环指标}。
+离线损失衡量的是“在已有数据上多准”，不是“在闭环里多稳”。}
+
+\section{习题}
+\begin{enumerate}[leftmargin=1.6em,itemsep=4pt]
+  \item 若每轮只收集 20 个回合（而非 140），需要几轮才能到 $100\%$？用实验回答。
+  \item 把 $\beta$ 混合加上（$\beta$ 从 $0.5$ 线性衰减到 $0$），比较前两轮的收敛速度。
+  \item 设计一个“更公平”的验证集：用策略自己的状态分布采样，看损失是否还上升。
+  \item 若专家只能标注“它自己走过的状态”（例如人类演示），有哪些替代方案？
+\end{enumerate}
