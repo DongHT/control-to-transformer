@@ -1,6 +1,6 @@
 # 合订本讲义
 
-三篇 + 附录，约 150 页。
+三篇 + 附录，**97 页**。
 
 ## 结构
 
@@ -16,14 +16,30 @@ book/
 
 ## 编译
 
+### 有 TeX Live / MacTeX
+
 ```bash
 cd book
 xelatex main.tex     # 第一遍生成目录与交叉引用
 xelatex main.tex     # 第二遍填好页码
 ```
 
-需要 TeX Live（含 `ctex`、`empheq`、`listings`）。
+### 没有 TeX（本机就是这种情况）
+
+用 **tectonic**（单文件、无需 root，首次运行自动拉取所需宏包）：
+
+```bash
+# 下载对应架构的二进制（arm64 / x86_64）
+curl -L -o tectonic.tar.gz \
+  https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-aarch64-apple-darwin.tar.gz
+tar xzf tectonic.tar.gz
+./tectonic -X compile main.tex      # 直接出 main.pdf
+```
+
+本仓库已附带编译好的 **`main.pdf`（97 页）**，不装 TeX 也能直接读。
+
 图片通过 `\graphicspath` 从 `../course/latex/` 与 `../tutorial/out/` 取，不需要拷贝。
+首次编译会下载约 200 MB 的宏包缓存（在 `~/Library/Caches/Tectonic`），之后离线可编。
 
 ## 拆分第三篇
 

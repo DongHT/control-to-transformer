@@ -28,7 +28,7 @@
 
 ### ① 想看文字
 
-只编一个文件，得到全部内容（三篇 + 附录，约 150 页）：
+只编一个文件，得到全部内容（三篇 + 附录，**97 页**）：
 
 ```bash
 cd book && xelatex main.tex && xelatex main.tex && open main.pdf

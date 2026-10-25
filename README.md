@@ -1,13 +1,13 @@
 # 倒立摆控制：从拉格朗日到 Transformer
 
 一部可以逐行验证的完整教程：同一台小车倒立摆，用**经典非线性控制**、**模仿学习与强化学习**、
-以及**从零手写的 Transformer** 各做一遍。三篇、约 150 页、20 集视频。
+以及**从零手写的 Transformer** 各做一遍。三篇、97 页、20 集视频。
 
 > **→ 从这里开始：[`COURSE.md`](COURSE.md)**（学习路径、章节表、五个可验证数字）
 
 | 产物 | 位置 |
 |---|---|
-| 合订本讲义（三篇 + 附录） | [`book/main.tex`](book/main.tex) |
+| 合订本讲义（三篇 + 附录） | [`book/main.tex`](book/main.tex)　·　**已编译 PDF：[`book/main.pdf`](book/main.pdf)（97 页）** |
 | 课程讲义源（第 1–10 讲 + 附录 A） | [`course/latex/`](course/latex/) |
 | Transformer 教程源（第 11–17 集） | [`tutorial/`](tutorial/) |
 | 视频 18 集（约 40 分钟） | `course/out/`、`tutorial/out/` |
@@ -24,7 +24,7 @@
 | **② 复现管线** | Python：被控对象、控制器、数据生成、训练、int8 导出、统一评测 | `build/*.py` |
 | **③ 课程（10 讲 + 附录 A）** | 讲义（LaTeX/ctex）+ 11 个视频 | `course/` |
 | **④ Transformer 实现教程（7 集）** | 讲义 + 视频 + **纯 numpy 手写反向**与 torch 双实现（梯度差 3e-14） | `tutorial/` |
-| **⑤ 合订本** | 三篇 + 附录，约 150 页 | `book/` |
+| **⑤ 合订本** | 三篇 + 附录，**97 页** | `book/` |
 
 ## 结果（60 组随机初值，12 s 闭环，统一协议）
 
