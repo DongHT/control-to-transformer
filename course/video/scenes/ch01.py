@@ -15,7 +15,18 @@ RAIL = 1.4
 
 
 # ----------------------------------------------------------------- 公式组件
+from kit import math_ as _kit_math, title as _kit_title   # 与其它讲统一：居中 + 淡入
+
+
 def math_(cv, x, y, tex, size=26, color=INK, anchor="ls", check=True, tag=None):
+    return _kit_math(cv, x, y, tex, size, color, anchor, check, tag)
+
+
+def title(cv, text, sub=None):
+    return _kit_title(cv, text, sub)
+
+
+def _unused_math_(cv, x, y, tex, size=26, color=INK, anchor="ls", check=True, tag=None):
     box = mr.paste(cv, x, y, tex, size=size, color="#%02x%02x%02x" % color,
                    anchor=anchor, ss=cv.ss)
     if check:
@@ -142,35 +153,137 @@ def s1(cv, t, dur):
 
 # ============================================================ S2
 def s2(cv, t, dur):
-    title(cv, "坐标约定与 3 条假设")
-    idx = min(int(t / 0.01), len(FALL) - 1)
+    title(cv, "系统与符号：每个量都标在图上")
+    idx = min(int(t / 0.012), len(FALL) - 1)
     pp, th = FALL[idx]
     a = appear(t, 0.2, 0.8)
-    cartpole(cv, 360, 500, th, p=pp, u=0.0, a=a)
-    cv.text(360, 192, "无驱动：自由倒下", size=21, color=FAINT, anchor="ma", alpha=a)
-    if a > 0:
-        px, py = 360 + pp * SCALE, 500 - 40
-        mx, my = px + math.sin(th) * L * SCALE * 0.5, py - math.cos(th) * L * SCALE * 0.5
-        nx, ny = math.cos(th) * 18, math.sin(th) * 18
-        cv.line((mx - nx, my - ny), (mx + nx, my + ny), CY, width=1.2, alpha=0.75 * a)
-        math_(cv, mx + nx * 2.1, my + ny * 2.1 + 8, r"l", 24, CY, check=False)
 
-    rows = [(r"p", "小车位置　向右为正", BL),
-            (r"\theta", "与竖直向上夹角　右倾为正", AM),
-            (r"l", "转轴到质心　0.60 m", CY),
-            (r"u", "水平力　|u| ≤ 12 N", MG)]
-    for i, (tex, txt, col) in enumerate(rows):
-        aa = appear(t, 0.6 + 0.5 * i, 0.6)
+    OX, OY = 300, 470          # 导轨原点（小车零位）
+    SC = 110.0                 # px / m
+    rail = 2.4
+    cartx = OX + pp * SC
+
+    # 导轨
+    cv.line((OX - rail * SC, OY), (OX + rail * SC, OY), (110, 130, 150), width=3, alpha=0.85 * a)
+    for sgn in (-1, 1):
+        x = OX + sgn * rail * SC
+        cv.line((x, OY - 34), (x, OY + 10), MG, width=2, alpha=0.8 * a)
+    cv.text(OX + rail * SC + 8, OY + 6, "x_max = 2.4 m", size=15, color=MG, alpha=a)
+    # 轨道摩擦 b_c
+
+
+    # 小车
+    cw, chh = 84, 40
+    cv.rect(cartx - cw / 2, OY - chh - 6, cartx + cw / 2, OY - 6, (60, 90, 118), width=2,
+            alpha=a, fill_alpha=0.55 * a, radius=5)
+    cv.text(cartx, OY - chh - 16, "m_c = 1.0 kg", size=16, color=INK, anchor="ma", alpha=a)
+
+    # 摆杆与质点
+    tx = cartx + math.sin(th) * L * SC
+    ty = OY - chh - 6 - math.cos(th) * L * SC
+    cv.line((cartx, OY - chh - 6), (tx, ty), CY, width=6, alpha=a)
+    cv.circle(tx, ty, 11, CY, width=2, alpha=a, fill_alpha=0.45 * a)
+    cv.text(tx + 16, ty - 6, "m_p = 0.25 kg（质点）", size=15, color=CY, alpha=a)
+    # 杆长标注
+    mxp, myp = (cartx + tx) / 2 + 26, (OY - chh - 6 + ty) / 2
+    cv.text(mxp, myp, "l = 0.60 m", size=15, color=CY, alpha=a)
+
+    # 角度弧与 θ
+    r = 74
+    cv.line((cartx, OY - chh - 6), (cartx, OY - chh - 6 - r), (110, 130, 150), width=1,
+            alpha=0.6 * a, dash=5)
+    arc = [(cartx + r * 0.55 * math.sin(math.pi / 2 * k / 12),
+            OY - chh - 6 - r * 0.55 * math.cos(math.pi / 2 * k / 12)) for k in range(13)]
+    cv_line = ""
+    for k in range(len(arc) - 1):
+        pass
+    import math as _m
+    pts = [(cartx + 0.55 * r * _m.sin(th * k / 12), OY - chh - 6 - 0.55 * r * _m.cos(th * k / 12))
+           for k in range(13)]
+    for k in range(len(pts) - 1):
+        cv.line(pts[k], pts[k + 1], AM, width=1.6, alpha=0.9 * a)
+    cv.text(cartx + 34, OY - chh - 6 - 58, "θ", size=22, color=AM, alpha=a)
+
+    # 位置 p（原点 → 小车）
+    y0 = OY + 46
+    cv.line((OX, y0), (cartx, y0), BL, width=2, alpha=a)
+    cv.arrow((cartx - 12, y0), (cartx, y0), BL, width=2, alpha=a)
+    cv.text((OX + cartx) / 2, y0 + 20, "p", size=20, color=BL, anchor="ma", alpha=a)
+    cv.line((OX, OY - 4), (OX, y0 + 4), (110, 130, 150), width=1, alpha=0.6 * a, dash=5)
+    cv.text(OX - 8, y0 + 20, "0", size=15, color=FAINT, anchor="ra", alpha=a)
+
+    # 力 u
+    cv.arrow((cartx + cw / 2 + 4, OY - chh / 2 - 6), (cartx + cw / 2 + 70, OY - chh / 2 - 6),
+             MG, width=2.6, alpha=a)
+    cv.text(cartx + cw / 2 + 76, OY - chh / 2 - 10, "u  |u| ≤ 12 N", size=15, color=MG, alpha=a)
+
+    # 重力
+    cv.arrow((tx, ty + 14), (tx, ty + 62), (150, 160, 172), width=1.8, alpha=0.9 * a)
+    cv.text(tx + 6, ty + 74, "g = 9.81 m/s²", size=14, color=(150, 160, 172), alpha=a)
+
+    # 转轴摩擦
+
+
+    a2 = appear(t, 4.6, 0.8)
+    cv.text(90, 596, "阻尼：b_c = 0.12 N·s/m（导轨）　b_p = 0.004 N·m·s（转轴）", size=15,
+            color=FAINT, alpha=a2)
+    a3 = appear(t, 5.6, 0.8)
+    cv.text(90, 640, "状态 x = (p, θ, v, ω)，v = ṗ，ω = θ̇；参数取值见下一页", size=17,
+            color=DIM, alpha=a3)
+
+
+def s_params(cv, t, dur):
+    title(cv, "全部参数：符号、取值与含义")
+    head = [("符号", 110), ("取值", 330), ("单位", 500), ("含义", 650)]
+    for txt, x in head:
+        cv.text(x, 186, txt, size=16, color=FAINT, alpha=appear(t, 0.3, 0.6))
+    rows = [(r"m_c", "1.0", "kg", "小车质量", CY),
+            (r"m_p", "0.25", "kg", "摆杆质点质量", CY),
+            (r"l", "0.60", "m", "转轴到质心距离", CY),
+            (r"g", "9.81", "m/s²", "重力加速度", DIM),
+            (r"b_c", "0.12", "N·s/m", "导轨粘性阻尼", BL),
+            (r"b_p", "0.004", "N·m·s/rad", "转轴粘性阻尼", BL),
+            (r"u_{\max}", "12", "N", "执行器饱和", MG),
+            (r"x_{\max}", "2.4", "m", "导轨半长", MG),
+            (r"\Delta t", "0.02", "s", "控制周期（50 Hz）", AM)]
+    for i, (tex, val, unit, mean, col) in enumerate(rows):
+        aa = appear(t, 0.5 + 0.42 * i, 0.5)
         if aa <= 0:
             continue
-        y = 210 + i * 72
-        math_(cv, 700, y, tex, 24, col)
-        cv.text(766, y, txt, size=25, color=INK, alpha=aa)
-    aa = appear(t, 3.2, 0.8)
-    if aa > 0:
-        math_(cv, 700, 512, r"v=\dot p,\qquad \omega=\dot\theta", 21, DIM)
-        cv.text(700, 560, "状态向量", size=21, color=FAINT, alpha=aa)
-        math_(cv, 700, 606, r"x=(p,\ \theta,\ v,\ \omega)\in\mathbb{R}^4", 21, DIM)
+        y = 228 + i * 44
+        math_(cv, 120, y, tex, 20, col)
+        cv.text(330, y, val, size=20, color=INK, alpha=aa)
+        cv.text(500, y, unit, size=18, color=FAINT, alpha=aa)
+        cv.text(650, y, mean, size=19, color=INK, alpha=aa)
+        cv.line((110, y + 14), (1150, y + 14), (60, 76, 94), width=1, alpha=0.35 * aa)
+    a = appear(t, 4.6, 0.8)
+    chip(cv, 110, 648, "这 9 个数字决定了后面所有实验；改参数只需改 build/plant.py 里的 P", CY, a, 17)
+
+
+def s_coords(cv, t, dur):
+    title(cv, "符号约定：正方向与单位")
+    rows = [(r"p", "小车位置，向右为正；原点取导轨中点", BL),
+            (r"\theta", "摆杆与竖直向上的夹角，右侧为正", AM),
+            (r"u", "作用在小车上的水平力，向右为正", MG),
+            (r"v=\dot p,\ \omega=\dot\theta", "平动速度与角速度", CY)]
+    for i, (tex, txt, col) in enumerate(rows):
+        aa = appear(t, 0.4 + 0.5 * i, 0.55)
+        if aa <= 0:
+            continue
+        y = 200 + i * 66
+        math_(cv, 110, y, tex, 21, col)
+        cv.text(360, y, txt, size=19, color=INK, alpha=aa)
+
+    a = appear(t, 2.8, 0.8)
+    cv.text(110, 500, "两条容易搞反的约定", size=19, color=INK, alpha=a)
+    a2 = appear(t, 3.4, 0.8)
+    cv.text(130, 540, "① θ = 0 是竖直向上（不稳定平衡），不是向下：所以 sinθ 项的符号与教科书相反", size=16,
+            color=DIM, alpha=a2)
+    cv.text(130, 572, "② 力 u 向右为正，但让摆“向右倾”需要把车向右推：u 与 θ 同号时摆更快倒下", size=16,
+            color=DIM, alpha=a2)
+    a3 = appear(t, 4.8, 0.8)
+    math_(cv, 110, 632, r"x=(p,\ \theta,\ v,\ \omega)^{\top}\in\mathbb{R}^{4},"
+                        r"\qquad \dot x=f(x,u)", 19, DIM)
 
 
 # ============================================================ S3
@@ -400,7 +513,23 @@ SHOTS = [
         {"say": "$l$ 是转轴到摆杆质心的距离（$0.60\\ \\mathrm{m}$），$u$ 是作用在小车上的水平力。",
          "tts": "l 是转轴到摆杆质心的距离，零点六米；u 是作用在小车上的水平力。"},
         "假设摆杆是一个质点，暂时忽略电机动态和传动柔性。",
-    ], draw=s2, min_dur=16.0),
+    ], draw=s2, min_dur=22.0),
+    dict(name="params", say=[
+        {"say": "把参数一次列全：小车质量 $1.0$ 千克，摆杆质点 $0.25$ 千克，杆长 $0.6$ 米。",
+         "tts": "把参数一次列全：小车质量一点零千克，摆杆质点零点二五千克，杆长零点六米。"},
+        {"say": "重力加速度 $9.81$；两处粘性阻尼：导轨 $0.12$，转轴 $0.004$。",
+         "tts": "重力加速度九点八一；两处粘性阻尼：导轨零点一二，转轴零点零零四。"},
+        {"say": "执行器上限 $12$ 牛顿，导轨半长 $2.4$ 米，控制周期 $20$ 毫秒。",
+         "tts": "执行器上限十二牛顿，导轨半长二点四米，控制周期二十毫秒。"},
+        "这九个数字决定了后面所有实验的可比性。",
+    ], draw=s_params, min_dur=19.0),
+    dict(name="coords", say=[
+        "再强调两条容易搞反的约定。",
+        {"say": "第一，$\theta$ 等于零是竖直向上，也就是不稳定平衡；这和我们习惯的“垂下为零”相反。",
+         "tts": "第一，theta 等于零是竖直向上，也就是不稳定平衡；这和我们习惯的垂下为零相反。"},
+        "第二，力向右为正，但让摆向右倾需要把车向右推——所以 u 与 θ 同号时，摆反而更快倒下。",
+        "这两条弄对，后面的符号才不会错。",
+    ], draw=s_coords, min_dur=18.0),
     dict(name="underactuated", say=[
         {"say": "为什么说它难？因为只有 1 个输入，却有 2 个自由度。",
          "tts": "为什么说它难？因为只有一个输入，却有两个自由度。"},

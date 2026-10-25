@@ -119,7 +119,8 @@ def paste(canvas, x, y, tex, size=40, color="#EAF2F8", anchor="ls", ss=2, baseli
         img.putalpha(a)
     w = img.width
     dy = int(img.height * baseline_of(tex, size * ss, color))
-    if anchor[0] == "c":
+    # 与 Canvas.text 一致：第一个字符 m/c 都表示水平居中
+    if anchor[0] in ("c", "m"):
         px = x * ss - w // 2
     elif anchor[0] == "r":
         px = x * ss - w
